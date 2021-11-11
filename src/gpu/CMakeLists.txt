@@ -14,7 +14,7 @@ if (USE_EXBLAS)
 endif (USE_EXBLAS)
 
 # compiler flags
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -march=native -fabi-version=0 -O3 -Wall -Wno-comment -Wno-maybe-uninitialized")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -march=native -fabi-version=0 -O3 -Wall -Wno-comment -Wno-maybe-uninitialized")
 
 # architecture specific flags
 option (EXBLAS_GPU_AMD "By setting this option we enable compilation for AMD GPUs" OFF)

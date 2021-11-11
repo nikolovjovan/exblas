@@ -20,9 +20,8 @@
 #include "ExSUM.MIC.hpp"
 #include "ExSUM.FPE.hpp"
 #include <omp.h>
-#include <tbb/blocked_range.h>
-#include <tbb/parallel_reduce.h>
-#include <tbb/task_scheduler_init.h>
+#include <oneapi/tbb/blocked_range.h>
+#include <oneapi/tbb/parallel_reduce.h>
 #include "common.hpp"
 
 

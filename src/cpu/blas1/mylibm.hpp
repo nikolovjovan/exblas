@@ -205,7 +205,7 @@ static inline double horizontal_max(Vec4d x) {
     Vec2d h = x.get_high();
     Vec2d l = x.get_low();
     Vec2d m1 = max(h, l);
-    Vec2d m2 = permute2d<1, 0>(m1);
+    Vec2d m2 = permute2<1, 0>(m1);
     Vec2d m = max(m1, m2);
     return m[0];    // Why is it so hard to convert from vector xmm register to scalar xmm register?
 }

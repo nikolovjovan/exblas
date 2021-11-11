@@ -13,7 +13,7 @@ if (USE_EXBLAS)
 endif (USE_EXBLAS)
 
 # compiler flags
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O2 -Wall -mmic -DATT_SYNTAX -DTHREADSAFE -fp-model precise -openmp -openmp-report=1")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O2 -Wall -mmic -DATT_SYNTAX -DTHREADSAFE -fp-model precise -openmp -openmp-report=1")
 
 # enabling timing
 option (EXBLAS_TIMING "Enable/disable timing of our routines using cycles" OFF)

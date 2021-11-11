@@ -19,9 +19,8 @@
 #include "superaccumulator.hpp"
 #include "ExSUM.FPE.hpp"
 #define TBB_PREVIEW_DETERMINISTIC_REDUCE 1
-#include <tbb/blocked_range.h>
-#include <tbb/parallel_reduce.h>
-#include <tbb/task_scheduler_init.h>
+#include <oneapi/tbb/blocked_range.h>
+#include <oneapi/tbb/parallel_reduce.h>
 #include <omp.h>
 
 #ifdef EXBLAS_MPI

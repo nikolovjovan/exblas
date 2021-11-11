@@ -179,10 +179,10 @@ inline static void transpose1(Vec4d & a, Vec4d & b)
 {
     // a3 -- a1 --
     // -- b3 -- b1
-    Vec4d a2 = blend4d<4|1,0|1,4|3,0|3>(a, b);
+    Vec4d a2 = blend4<4|1,0|1,4|3,0|3>(a, b);
     // a2 -- a0 --
     // -- b2 -- b0
-    Vec4d b2 = blend4d<4|0,0|0,4|2,0|2>(a, b);
+    Vec4d b2 = blend4<4|0,0|0,4|2,0|2>(a, b);
     a = a2;
     b = b2;
 }
@@ -197,10 +197,10 @@ inline static void transpose2(Vec4d & a, Vec4d & b)
 {
     // a3 a2 -- --
     // -- -- b3 b2
-    Vec4d a2 = blend4d<4|2,4|3,0|2,0|3>(a, b);
+    Vec4d a2 = blend4<4|2,4|3,0|2,0|3>(a, b);
     // a1 a0 -- --
     // -- -- b1 b0
-    Vec4d b2 = blend4d<4|0,4|1,0|0,0|1>(a, b);
+    Vec4d b2 = blend4<4|0,4|1,0|0,0|1>(a, b);
     a = a2;
     b = b2;
 }
