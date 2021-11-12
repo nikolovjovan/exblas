@@ -13,7 +13,7 @@ if (USE_EXBLAS)
 endif (USE_EXBLAS)
 
 # compiler flags
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -march=native -fabi-version=0 -O3 -Wall -fopenmp -masm=intel")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -march=native -fabi-version=0 -O1 -Wall -fopenmp -masm=intel")
 
 # enabling timing
 option (EXBLAS_TIMING "Enable/disable timing of our routines using cycles" OFF)
@@ -67,3 +67,4 @@ add_subdirectory (blas1)
 
 target_include_directories (exblas PUBLIC "/opt/intel/oneapi/tbb/latest/include/")
 target_link_libraries (exblas -L/opt/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/)
+target_link_libraries (exblas /opt/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/libtbb.so)
