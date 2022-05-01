@@ -26,7 +26,6 @@ In order to use ExBLAS, the following software is needed:
   * [Required] For CPUs, support of AVX instructions
   * [Required] For CPUs, Intel TBB library of version 4.0 or higher
   * [Required] For CPUs, support of C++11
-  * [Required] For MIC, Intel C/C++ compilers
   * [Required] For GPUs only, OpenCL of version 1.1 or higher
   * [Optional] GMP of version 6.0
   * [Optional] MPFR of version 3.1.2
@@ -47,7 +46,6 @@ Compilation Options
 ---------------------------------------------
 * -DEXBLAS_MPI=ON -- enables compilation with MPI. By default, only shared-memory 
    parallelism is activated
-* -DEXBLAS_MIC=ON -- enables compilation for Intel MIC architectures
 * -DEXBLAS_GPU=ON -- enables compilation for GPUs
    -DEXBLAS_GPU_AMD=ON -- for AMD GPUs
    -DEXBLAS_GPU_NVIDIA=ON -- for NVIDIA GPUs
@@ -64,10 +62,6 @@ Compilation
             make install
 
 * For GPU: CC=mpicc CXX=mpicxx cmake -DEXBLAS_GPU=ON -DEXBLAS_AMD|NVIDIA_GPU=ON ..
-           make
-           make install
-
-* For MIC: CC=mpicc CXX=mpicxx cmake -DEXBLAS_MIC=ON ..
            make
            make install
 

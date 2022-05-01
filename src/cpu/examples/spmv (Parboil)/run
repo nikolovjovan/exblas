@@ -1,0 +1,4 @@
+./spmv ../data/bcsstk32.mtx
+./spmv ../data/fidapm05_rhs1.mtx
+./spmv ../data/fidapm05.mtx
+./spmv ../data/jgl009.mtx

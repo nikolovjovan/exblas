@@ -28,6 +28,8 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 # enable testing
 enable_testing ()
 
+option (TEST_EXAMPLES "Execute examples with default parameters during CTest" OFF)
+
 # Recurse into the "src" subdirectory. This does not actually
 # cause another cmake executable to run. The same process will walk through
 # the project's entire directory structure.
