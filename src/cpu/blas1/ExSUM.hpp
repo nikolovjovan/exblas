@@ -80,10 +80,10 @@ public:
  * \param a vector
  * \param inca specifies the increment for the elements of a
  * \param offset specifies position in the vector to start with 
- * TODO: not done for offset
+ * \param parallel specifies whether to run ExSUM in parallel. By default, it is enabled
  * \return Contains the reproducible and accurate sum of elements of a real vector
  */
-double ExSUMSuperacc(int N, double *a, int inca, int offset);
+double ExSUMSuperacc(int N, double *a, int inca, int offset, bool parallel);
 
 /**
  * \ingroup ExSUM
@@ -95,9 +95,10 @@ double ExSUMSuperacc(int N, double *a, int inca, int offset);
  * \param a vector
  * \param inca specifies the increment for the elements of a
  * \param offset specifies position in the vector to start with 
- * TODO: not done for inca and offset
+ * \param parallel specifies whether to run ExSUM in parallel. By default, it is enabled
+ * TODO: not done for inca (sequential or parallel) and offset (parallel-only)
  * \return Contains the reproducible and accurate sum of elements of a real vector
  */
-template<typename CACHE> double ExSUMFPE(int N, double *a, int inca, int offset);
+template<typename CACHE> double ExSUMFPE(int N, double *a, int inca, int offset, bool parallel);
 
 #endif // EXSUM_HPP_

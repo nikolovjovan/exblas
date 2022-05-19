@@ -58,9 +58,10 @@ static double runExSUM(const int N, double *a, const int inca, const int offset,
  * \param offset specifies position in the vector to start with 
  * \param fpe stands for the floating-point expansions size (used in conjuction with superaccumulators)
  * \param early_exit specifies the optimization technique. By default, it is disabled
+ * \param parallel specifies whether to run ExSUM in parallel. Does not affect GPU implementation since it is always parallel
  * \return Contains the reproducible and accurate sum of elements of a real vector
  */
-double exsum(const int Ng, double *ag, const int inca, const int offset, const int fpe, const bool early_exit) {
+double exsum(const int Ng, double *ag, const int inca, const int offset, const int fpe, const bool early_exit, const bool parallel) {
     char path[256];
     strcpy(path, EXBLAS_BINARY_DIR);
     strcat(path, "/include/cl/");

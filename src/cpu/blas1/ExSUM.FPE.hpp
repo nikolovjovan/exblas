@@ -18,7 +18,7 @@
 /**
  * \struct FPExpansionTraits
  * \ingroup ExSUM
- * \brief This struct is meant ot specify optimization or other technique used
+ * \brief This struct is meant to specify optimization or other technique used
  */
 template<bool EX=false, bool FLUSHHI=false, bool H2SUM=false, bool CRF=false, bool CSWAP=false, bool B2SUM=true, bool SORT=false, bool VICT=false>
 struct FPExpansionTraits

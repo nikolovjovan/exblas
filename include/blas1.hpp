@@ -42,9 +42,10 @@
  * \param offset specifies position in the vector from its start
  * \param fpe stands for the floating-point expansions size (used in conjuction with superaccumulators)
  * \param early_exit specifies the optimization technique. By default, it is disabled
+ * \param parallel specifies whether to run ExSUM in parallel. By default, it is enabled
  * \return Contains the reproducible and accurate sum of elements of a real vector
  */
-double exsum(const int Ng, double *ag, const int inca, const int offset, const int fpe, const bool early_exit = false);
+double exsum(const int Ng, double *ag, const int inca, const int offset, const int fpe, const bool early_exit = false, const bool parallel = true);
 
 /**
  * \defgroup ExDOT Dot Product Functions

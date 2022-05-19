@@ -61,6 +61,9 @@ uint64_t time_sequential, time_parallel;
 float sum_sequential_acc, sum_sequential_fpe2, sum_sequential_fpe4, sum_sequential_fpe8ee;
 uint64_t time_sequential_acc, time_sequential_fpe2, time_sequential_fpe4, time_sequential_fpe8ee;
 
+float sum_exblas_acc, sum_exblas_fpe2, sum_exblas_fpe4, sum_exblas_fpe8ee;
+uint64_t time_exblas_acc, time_exblas_fpe2, time_exblas_fpe4, time_exblas_fpe8ee;
+
 float sum_parallel_acc, sum_parallel_fpe2, sum_parallel_fpe4, sum_parallel_fpe8ee;
 uint64_t time_parallel_acc, time_parallel_fpe2, time_parallel_fpe4, time_parallel_fpe8ee;
 
@@ -70,6 +73,7 @@ typedef struct {
     int tid;
     int fpe;
     bool early_exit;
+    char type[20];
 
     // Output
     //
@@ -227,9 +231,13 @@ void generate_elements()
 
     elements = new vector<float>(element_count);
 
-    // exsum requires double
+    // ExSum requires array of doubles.
     //
     dbl_elements = new vector<double>(element_count);
+
+    if (print_elements) {
+        cout << endl;
+    }
 
     int positive_count = 0, negative_count = 0;
     for (int i = 0; i < element_count; ++i) {
@@ -238,7 +246,7 @@ void generate_elements()
         float number;
         memcpy(&number, &bits, sizeof(uint32_t));
         (*elements)[i] = number;
-        (*dbl_elements)[i] = static_cast<double> (number);
+        (*dbl_elements)[i] = number;
         if (print_elements) {
             cout << i + 1 << ". element: " << fixed << setprecision(10) << number << " (" << scientific
                  << setprecision(10) << number << ')' << endl;
@@ -251,11 +259,11 @@ void generate_elements()
     }
 
     if (print_elements) {
-        cout << "Number of positive elements: " << positive_count << endl;
+        cout << endl << "Number of positive elements: " << positive_count << endl;
         cout << "Number of negative elements: " << negative_count << endl;
     }
 
-    cout << "Successfully generated " << element_count << " random floating-point numbers." << endl;
+    cout << endl << "Successfully generated " << element_count << " random floating-point numbers." << endl << endl;
 }
 
 void run_sequential(float& result, uint64_t& time)
@@ -289,22 +297,30 @@ void run_sequential(float& result, uint64_t& time)
     }
 }
 
-void run_sequential_reproducible(float& result, uint64_t& time, const int fpe = 0, const bool early_exit = false)
+void run_sequential_reproducible(const char type[], float& result, uint64_t& time, const int fpe = 0, const bool early_exit = false, const bool parallel = false)
 {
     chrono::steady_clock::time_point start;
     float sum;
+
     for (int run_idx = 0; run_idx <= repeat_count; ++run_idx) {
         if (run_idx == 0) {
             start = chrono::steady_clock::now();
         }
-        sum = static_cast<float> (exsum(element_count, dbl_elements->data(), 1, 0, fpe, early_exit));
+        sum = static_cast<float> (exsum(
+            /* Ng */            element_count,
+            /* ag */            dbl_elements->data(),
+            /* inca */          1,
+            /* offset */        0,
+            /* fpe */           fpe,
+            /* early_exit */    early_exit,
+            /* parallel */      parallel));
         if (run_idx == 0) {
             result = sum;
             time = chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
-            cout << "Sequential sum (reproducible): " << fixed << setprecision(10) << result
+            cout << (parallel ? "ExBLAS" : "Sequential") << " reproducible sum (" << type << "): " << fixed << setprecision(10) << result
                  << " (" << scientific << setprecision(10) << result << ')' << endl;
         } else if (sum != result) {
-            cout << "Sequential sum not reproducible after " << run_idx << " runs!" << endl;
+            cout << (parallel ? "ExBLAS" : "Sequential") << " reproducible sum (" << type << ") not reproducible after " << run_idx << " runs!" << endl;
             break;
         }
         if (run_idx < repeat_count) {
@@ -530,7 +546,14 @@ void *kernel_sum_reproducible(void *data)
         pthread_barrier_wait(&barrier);
 
         int end = params->tid < thread_count - 1 ? start_indices[params->tid + 1] : element_count;
-        dbl_partial_sums[params->tid] = exsum(end - start_indices[params->tid], dbl_elements->data(), 1, start_indices[params->tid], params->fpe, params->early_exit);
+        dbl_partial_sums[params->tid] = exsum(
+            /* Ng */            end,
+            /* ag */            dbl_elements->data(),
+            /* inca */          1,
+            /* offset */        start_indices[params->tid],
+            /* fpe */           params->fpe,
+            /* early_exit */    params->early_exit,
+            /* parallel */      false);
 
         // Wait on barrier to synchronize all threads to start parallel reduction
         pthread_barrier_wait(&barrier);
@@ -538,16 +561,28 @@ void *kernel_sum_reproducible(void *data)
         if (params->tid == 0)
         {
             // Reduce partial sums
-            dbl_partial_sums[0] = exsum(thread_count, dbl_partial_sums, 1, 0, params->fpe, params->early_exit);
+            // NOTE: This may be inaccurate due to rounding of partial sums to double.
+            //       However, it should still be reproducible.
+            //
+            float result = static_cast<float> (exsum(
+                /* Ng */            thread_count,
+                /* ag */            dbl_partial_sums,
+                /* inca */          1,
+                /* offset */        0,
+                /* fpe */           params->fpe,
+                /* early_exit */    params->early_exit,
+                /* parallel */      false));
+
             // Check results
+            //
             if (repeat_counter == 0) {
                 params->time = chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
-                params->result = static_cast<float> (partial_sums[0]);
+                params->result = result;
                 result_valid = true;
-                cout << "Parallel sum (reproducible): " << fixed << setprecision(10) << params->result
+                cout << "Parallel reproducible sum (" << params->type << "): " << fixed << setprecision(10) << params->result
                      << " (" << scientific << setprecision(10) << params->result << ')' << endl;
-            } else if (static_cast<float> (partial_sums[0]) != params->result) {
-                cout << "Parallel sum (reproducible) not reproducible after " << repeat_counter << " runs!" << endl;
+            } else if (result != params->result) {
+                cout << "Parallel reproducible sum (" << params->type << ") not reproducible after " << repeat_counter << " runs!" << endl;
                 result_valid = false;
             }
             if (repeat_counter < repeat_count && result_valid) {
@@ -564,7 +599,7 @@ void *kernel_sum_reproducible(void *data)
     pthread_exit(NULL);
 }
 
-void run_parallel_reproducible(float& result, uint64_t& time, const int fpe, const bool early_exit = false)
+void run_parallel_reproducible(const char type[], float& result, uint64_t& time, const int fpe, const bool early_exit = false)
 {
     // Get number of available processors
     const int processor_count = thread::hardware_concurrency();
@@ -601,6 +636,7 @@ void run_parallel_reproducible(float& result, uint64_t& time, const int fpe, con
         params[i].tid = i;   // Generate thread ids for easy work sharing
         params[i].fpe = fpe;
         params[i].early_exit = early_exit;
+        strncpy(params[i].type, type, strlen(type));
         CPU_ZERO(&cpus);
         CPU_SET(i % processor_count, &cpus);
         pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpus);
@@ -655,7 +691,7 @@ void print_diff_reproducible(const char type[], const float sum1, const float su
          << (sum1 != sum2 ? "do not " : "") << "match!" << endl;
 }
 
-void print_time_speedup(const char type[], const uint64_t time_seq, const uint64_t time_par)
+void print_time_speedup(const char type[], const uint64_t time_seq, const uint64_t time_par, bool exblas = false)
 {
     stringstream buffer;
     if (strlen(type) > 0)
@@ -665,17 +701,17 @@ void print_time_speedup(const char type[], const uint64_t time_seq, const uint64
     cout << endl
          << "Sequential execution time" << buffer.str() << ": " << time_seq << " [us] (" << fixed << setprecision(10)
          << (float) time_seq / 1000.0 << " [ms])" << endl;
-    cout << "Parallel execution time" << buffer.str() << ": " << time_par << " [us] (" << fixed << setprecision(10)
+    cout << (exblas ? "ExBLAS" : "Parallel") << " execution time" << buffer.str() << ": " << time_par << " [us] (" << fixed << setprecision(10)
          << (float) time_par / 1000.0 << " [ms])" << endl;
     cout << "Speedup" << buffer.str() << ": " << fixed << setprecision(10) << ((float) time_seq) / ((float) time_par) << endl
          << endl;
 }
 
-void print_time_diff(const char type[], const uint64_t time_seq, const uint64_t time_par, const uint64_t time_seq_rep, const uint64_t time_par_rep)
+void print_time_diff(const char type[], const uint64_t time_seq, const uint64_t time_par, const uint64_t time_seq_rep, const uint64_t time_par_rep, bool exblas = false)
 {
     cout << "Time sequential reproducible - " << type << " / non-reproducible: " << fixed << setprecision(10)
          << ((float) time_seq_rep) / ((float) time_seq) << endl;
-    cout << "Time parallel reproducible - " << type << " / non-reproducible: " << fixed << setprecision(10)
+    cout << "Time " << (exblas ? "ExBLAS" : "parallel") << " reproducible - " << type << " / non-reproducible: " << fixed << setprecision(10)
          << ((float) time_par_rep) / ((float) time_par) << endl;
 }
 
@@ -683,6 +719,7 @@ void cleanup()
 {
     delete shuffle_engine;
     delete elements;
+    delete dbl_elements;
 }
 
 int main(int argc, char *argv[])
@@ -697,26 +734,48 @@ int main(int argc, char *argv[])
     run_sequential(sum_sequential, time_sequential);
     run_parallel(sum_parallel, time_parallel);
 
-    run_sequential_reproducible(sum_sequential_acc,     time_sequential_acc,    0, false);
-    run_sequential_reproducible(sum_sequential_fpe2,    time_sequential_fpe2,   2, false);
-    run_sequential_reproducible(sum_sequential_fpe4,    time_sequential_fpe4,   4, false);
-    run_sequential_reproducible(sum_sequential_fpe8ee,  time_sequential_fpe8ee, 8, true);
+    cout << endl;
 
-    run_parallel_reproducible(sum_parallel_acc,     time_parallel_acc,    0, false);
-    run_parallel_reproducible(sum_parallel_fpe2,    time_parallel_fpe2,   2, false);
-    run_parallel_reproducible(sum_parallel_fpe4,    time_parallel_fpe4,   4, false);
-    run_parallel_reproducible(sum_parallel_fpe8ee,  time_parallel_fpe8ee, 8, true);
+    run_sequential_reproducible("accumulator-only", sum_sequential_acc,     time_sequential_acc,    0, false);
+    run_sequential_reproducible("fpe2",             sum_sequential_fpe2,    time_sequential_fpe2,   2, false);
+    run_sequential_reproducible("fpe4",             sum_sequential_fpe4,    time_sequential_fpe4,   4, false);
+    run_sequential_reproducible("fpe8ee",           sum_sequential_fpe8ee,  time_sequential_fpe8ee, 8, true);
 
     print_diff_nrr("sequential",    "accumulator-only", sum_sequential, sum_sequential_acc);
     print_diff_nrr("sequential",    "fpe2",             sum_sequential, sum_sequential_fpe2);
     print_diff_nrr("sequential",    "fpe4",             sum_sequential, sum_sequential_fpe4);
     print_diff_nrr("sequential",    "fpe8ee",           sum_sequential, sum_sequential_fpe8ee);
-    print_diff_nrr("parallel",      "accumulator-only", sum_parallel,   sum_sequential_acc);
-    print_diff_nrr("parallel",      "fpe2",             sum_parallel,   sum_sequential_fpe2);
-    print_diff_nrr("parallel",      "fpe4",             sum_parallel,   sum_sequential_fpe4);
-    print_diff_nrr("parallel",      "fpe8ee",           sum_parallel,   sum_sequential_fpe8ee);
 
     cout << endl;
+
+    run_sequential_reproducible("accumulator-only", sum_exblas_acc,     time_exblas_acc,    0, false, /* ExBLAS parallel */ true);
+    run_sequential_reproducible("fpe2",             sum_exblas_fpe2,    time_exblas_fpe2,   2, false, /* ExBLAS parallel */ true);
+    run_sequential_reproducible("fpe4",             sum_exblas_fpe4,    time_exblas_fpe4,   4, false, /* ExBLAS parallel */ true);
+    run_sequential_reproducible("fpe8ee",           sum_exblas_fpe8ee,  time_exblas_fpe8ee, 8, true,  /* ExBLAS parallel */ true);
+
+    print_diff_nrr("parallel",      "accumulator-only", sum_parallel,   sum_exblas_acc);
+    print_diff_nrr("parallel",      "fpe2",             sum_parallel,   sum_exblas_fpe2);
+    print_diff_nrr("parallel",      "fpe4",             sum_parallel,   sum_exblas_fpe4);
+    print_diff_nrr("parallel",      "fpe8ee",           sum_parallel,   sum_exblas_fpe8ee);
+
+    cout << endl;
+
+    run_parallel_reproducible("accumulator-only", sum_parallel_acc,     time_parallel_acc,    0, false);
+    run_parallel_reproducible("fpe2",             sum_parallel_fpe2,    time_parallel_fpe2,   2, false);
+    run_parallel_reproducible("fpe4",             sum_parallel_fpe4,    time_parallel_fpe4,   4, false);
+    run_parallel_reproducible("fpe8ee",           sum_parallel_fpe8ee,  time_parallel_fpe8ee, 8, true);
+
+    print_diff_nrr("parallel",      "accumulator-only", sum_parallel,   sum_parallel_acc);
+    print_diff_nrr("parallel",      "fpe2",             sum_parallel,   sum_parallel_fpe2);
+    print_diff_nrr("parallel",      "fpe4",             sum_parallel,   sum_parallel_fpe4);
+    print_diff_nrr("parallel",      "fpe8ee",           sum_parallel,   sum_parallel_fpe8ee);
+
+    cout << endl;
+
+    print_diff_reproducible("accumulator-only", sum_sequential_acc,     sum_exblas_acc);
+    print_diff_reproducible("fpe2",             sum_sequential_fpe2,    sum_exblas_fpe2);
+    print_diff_reproducible("fpe4",             sum_sequential_fpe4,    sum_exblas_fpe4);
+    print_diff_reproducible("fpe8ee",           sum_sequential_fpe8ee,  sum_exblas_fpe8ee);
 
     print_diff_reproducible("accumulator-only", sum_sequential_acc,     sum_parallel_acc);
     print_diff_reproducible("fpe2",             sum_sequential_fpe2,    sum_parallel_fpe2);
@@ -728,16 +787,32 @@ int main(int argc, char *argv[])
     print_time_speedup("", time_sequential, time_parallel);
 
     print_time_speedup  ("acc", time_sequential_acc, time_parallel_acc);
+    print_time_diff     ("acc", time_sequential, time_parallel, time_sequential_acc, time_exblas_acc, /* ExBLAS */ true);
     print_time_diff     ("acc", time_sequential, time_parallel, time_sequential_acc, time_parallel_acc);
     
     print_time_speedup  ("fpe2", time_sequential_fpe2, time_parallel_fpe2);
+    print_time_diff     ("fpe2", time_sequential, time_parallel, time_sequential_fpe2, time_exblas_fpe2, /* ExBLAS */ true);
     print_time_diff     ("fpe2", time_sequential, time_parallel, time_sequential_fpe2, time_parallel_fpe2);
     
     print_time_speedup  ("fpe4", time_sequential_fpe4, time_parallel_fpe4);
+    print_time_diff     ("fpe4", time_sequential, time_parallel, time_sequential_fpe4, time_exblas_fpe4, /* ExBLAS */ true);
     print_time_diff     ("fpe4", time_sequential, time_parallel, time_sequential_fpe4, time_parallel_fpe4);
     
     print_time_speedup  ("fpe8ee", time_sequential_fpe8ee, time_parallel_fpe8ee);
+    print_time_diff     ("fpe8ee", time_sequential, time_parallel, time_sequential_fpe8ee, time_exblas_fpe8ee, /* ExBLAS */ true);
     print_time_diff     ("fpe8ee", time_sequential, time_parallel, time_sequential_fpe8ee, time_parallel_fpe8ee);
+
+    cout << endl;
+
+    print_time_speedup  ("acc", time_sequential_acc, time_exblas_acc, /* ExBLAS */ true);
+    print_time_speedup  ("fpe2", time_sequential_fpe2, time_exblas_fpe2, /* ExBLAS */ true);
+    print_time_speedup  ("fpe4", time_sequential_fpe4, time_exblas_fpe4, /* ExBLAS */ true);
+    print_time_speedup  ("fpe8ee", time_sequential_fpe8ee, time_exblas_fpe8ee, /* ExBLAS */ true);
+
+    print_time_speedup  ("acc", time_sequential_acc, time_parallel_acc);
+    print_time_speedup  ("fpe2", time_sequential_fpe2, time_parallel_fpe2);
+    print_time_speedup  ("fpe4", time_sequential_fpe4, time_parallel_fpe4);
+    print_time_speedup  ("fpe8ee", time_sequential_fpe8ee, time_parallel_fpe8ee);
 
     cleanup();
 
