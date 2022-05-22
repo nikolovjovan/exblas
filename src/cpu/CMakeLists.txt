@@ -21,5 +21,5 @@ endif (USE_EXBLAS)
 
 # Traverse library and examples.
 #
-add_subdirectory (blas1)
+add_subdirectory (blas)
 add_subdirectory (examples)

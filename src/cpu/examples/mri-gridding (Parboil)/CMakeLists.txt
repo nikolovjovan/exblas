@@ -12,7 +12,7 @@ set (EXAMPLE_TARGET_NAME_BASE mri-gridding)
 
 # Set install target directory.
 #
-set (EXAMPLE_TARGET_DIR ${PROJECT_BINARY_DIR}/examples/${EXAMPLE_TARGET_NAME_BASE})
+set (EXAMPLE_TARGET_DIR ${PROJECT_BINARY_DIR}/examples/cpu/${EXAMPLE_TARGET_NAME_BASE})
 
 # Traverse example versions.
 #
