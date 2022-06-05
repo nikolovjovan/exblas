@@ -282,6 +282,7 @@ int main(int argc, char **argv)
     printf("Time sequential reproducible / non-reproducible: %.3f\n", time_seq_rep / time_seq);
     printf("Time parallel reproducible / non-reproducible: %.3f\n", time_omp_rep / time_omp);
 
+    free(attributes[0]);
     free(attributes);
     free(cluster_centres_seq[0]);
     free(cluster_centres_seq);

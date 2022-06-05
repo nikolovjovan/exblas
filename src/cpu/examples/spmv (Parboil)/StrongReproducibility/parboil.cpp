@@ -139,7 +139,7 @@ consume_argument(struct argparse *ap)
 struct pb_Parameters *
 pb_ReadParameters(int *_argc, char **argv)
 {
-  char *err_message;
+  char *err_message, *tmp;
   struct argparse ap;
   struct pb_Parameters *ret =
     (struct pb_Parameters *)malloc(sizeof(struct pb_Parameters));
@@ -190,6 +190,30 @@ pb_ReadParameters(int *_argc, char **argv)
 	    goto error;
 	  }
 	ret->nruns = strtoul(consume_argument(&ap), NULL, 10);
+	break;
+      case 'f':
+  if (is_end_of_arguments(&ap))
+	  {
+	    err_message = "Expecting number of floating-point expansions after '-f'\n";
+	    goto error;
+	  }
+	ret->fpe = strtoul(consume_argument(&ap), NULL, 10);
+	break;
+      case 'e':
+  if (is_end_of_arguments(&ap))
+	  {
+	    err_message = "Expecting number of runs after '-r'\n";
+	    goto error;
+	  }
+  tmp = consume_argument(&ap);
+  if (strlen(tmp) == 4 && strncmp("true", tmp, 4))
+  {
+    ret->early_exit = true;
+  }
+  else
+  {
+    ret->early_exit = false;
+  }
 	break;
       case '-':			/* End of options */
 	goto end_of_options;

@@ -16,8 +16,9 @@
 #include "convert_dataset.h"
 
 #include <omp.h>
-#include "../../../../config.h"
-#include <binned.h>
+
+#include "blas1.hpp"
+#include "common.hpp"
 
 using namespace std;
 
@@ -48,20 +49,19 @@ bool diff(int dim, float *h_Ax_vector_1, float *h_Ax_vector_2)
     return false;
 }
 
-void spmv_seq (bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
+void spmv_seq (bool reproducible, const int fpe, const bool early_exit,
+               int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
                float *h_x_vector, int *h_perm, float *h_Ax_vector)
 {
     float sum = 0.0f;
-    float_binned* sum_binned = binned_sballoc(SIDEFAULTFOLD);
+    double* dbl_products = (double*) malloc(dim * sizeof(double));
 
     // Consider creating a random map by creating an array 0..dim - 1 and randomly shuffling it
     // for each execution. This should provide required randomness given the order of operations
     // is sequential at the moment.
     //
     for (int i = 0; i < dim; i++) {
-        if (reproducible) {
-            binned_sbsetzero(SIDEFAULTFOLD, sum_binned);
-        } else {
+        if (!reproducible) {
             sum = 0.0f;
         }
 
@@ -75,29 +75,37 @@ void spmv_seq (bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indi
             float t = h_x_vector[in];
 
             if (reproducible) {
-                binned_sbsadd(SIDEFAULTFOLD, d * t, sum_binned);
+                dbl_products[k] = static_cast<double> (d) * t;
             } else {
                 sum += d * t;
             }
         }
 
         if (reproducible) {
-            h_Ax_vector[h_perm[i]] = binned_ssbconv(SIDEFAULTFOLD, sum_binned);
+            h_Ax_vector[h_perm[i]] = static_cast<float> (exsum(
+            /* Ng */            bound,
+            /* ag */            dbl_products,
+            /* inca */          1,
+            /* offset */        0,
+            /* fpe */           fpe,
+            /* early_exit */    early_exit,
+            /* parallel */      false));
         } else {
             h_Ax_vector[h_perm[i]] = sum;
         }
     }
 
-    free(sum_binned);
+    free(dbl_products);
 }
 
-void spmv_omp (bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
+void spmv_omp (bool reproducible, const int fpe, const bool early_exit,
+               int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
                float *h_x_vector, int *h_perm, float *h_Ax_vector)
 {
 #pragma omp parallel
 {
     float sum = 0.0f;
-    float_binned* sum_binned = binned_sballoc(SIDEFAULTFOLD);
+    double* dbl_products = (double*) malloc(dim * sizeof(double));
 
     // Consider creating a random map by creating an array 0..dim - 1 and randomly shuffling it
     // for each execution. This should provide required randomness given the order of operations
@@ -105,9 +113,7 @@ void spmv_omp (bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indi
     //
 #pragma omp for
     for (int i = 0; i < dim; i++) {
-        if (reproducible) {
-            binned_sbsetzero(SIDEFAULTFOLD, sum_binned);
-        } else {
+        if (!reproducible) {
             sum = 0.0f;
         }
 
@@ -121,24 +127,32 @@ void spmv_omp (bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indi
             float t = h_x_vector[in];
 
             if (reproducible) {
-                binned_sbsadd(SIDEFAULTFOLD, d * t, sum_binned);
+                dbl_products[k] = static_cast<double> (d) * t;
             } else {
                 sum += d * t;
             }
         }
 
         if (reproducible) {
-            h_Ax_vector[h_perm[i]] = binned_ssbconv(SIDEFAULTFOLD, sum_binned);
+            h_Ax_vector[h_perm[i]] = static_cast<float> (exsum(
+            /* Ng */            bound,
+            /* ag */            dbl_products,
+            /* inca */          1,
+            /* offset */        0,
+            /* fpe */           fpe,
+            /* early_exit */    early_exit,
+            /* parallel */      false));
         } else {
             h_Ax_vector[h_perm[i]] = sum;
         }
     }
 
-    free(sum_binned);
+    free(dbl_products);
 }
 }
 
-void execute (uint32_t nruns, bool parallel, bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
+void execute (uint32_t nruns, bool parallel, bool reproducible, const int fpe, const bool early_exit,
+              int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
               float *h_x_vector, int *h_perm, float *h_Ax_vector, double &time)
 {
     printf("Running %s (%sreproducible) implementation...\n", parallel ? "parallel" : "sequential", reproducible ? "" : "non-");
@@ -151,9 +165,9 @@ void execute (uint32_t nruns, bool parallel, bool reproducible, int dim, int *h_
         if (i == 0)
             time = omp_get_wtime();
         if (parallel)
-            spmv_omp(reproducible, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, tmp_h_Ax_vector);
+            spmv_omp(reproducible, fpe, early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, tmp_h_Ax_vector);
         else
-            spmv_seq(reproducible, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, tmp_h_Ax_vector);
+            spmv_seq(reproducible, fpe, early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, tmp_h_Ax_vector);
         if (i == 0) {
             time = omp_get_wtime() - time;
             memcpy (h_Ax_vector, tmp_h_Ax_vector, dim * sizeof (float));
@@ -241,10 +255,10 @@ int main (int argc, char** argv)
 
     double time_seq, time_omp, time_seq_rep, time_omp_rep;
 
-    execute (nruns, false, false, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq, time_seq);
-    execute (nruns, false, true, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq_rep, time_seq_rep);
-    execute (nruns, true, false, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_omp, time_omp);
-    execute (nruns, true, true, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_omp_rep, time_omp_rep);
+    execute (nruns, false, false, parameters->fpe, parameters->early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq, time_seq);
+    execute (nruns, false, true, parameters->fpe, parameters->early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq_rep, time_seq_rep);
+    execute (nruns, true, false, parameters->fpe, parameters->early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_omp, time_omp);
+    execute (nruns, true, true, parameters->fpe, parameters->early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_omp_rep, time_omp_rep);
 
     printf("Non-reproducible sequential and parallel results %smatch!\n",
            diff(dim, h_Ax_vector_seq, h_Ax_vector_omp) ? "do not " : "");

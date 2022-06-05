@@ -26,6 +26,8 @@ struct pb_Parameters {
   uint32_t seed;  /* Random number generator seed. If 0,
          * default seed is used. */
   uint32_t nruns; /* Number of runs */
+  int fpe;  /* number of floating-point expansions */
+  bool early_exit; /* optimization */
 };
 
 /* Read command-line parameters.

@@ -545,7 +545,7 @@ void print_time_speedup_exblas(const char type[], const uint64_t time_par, const
     cout << "ExBLAS execution time - " << type << ": " << time_par_rep << " [us] (" << fixed << setprecision(10)
          << (float) time_par_rep / 1000.0 << " [ms])" << endl;
     cout << "Speedup ExBLAS reproducible - " << type << " / parallel non-reproducible: " << fixed << setprecision(10)
-         << ((float) time_par_rep) / ((float) time_par) << endl;
+         << ((float) time_par) / ((float) time_par_rep) << endl;
 }
 
 void cleanup()
@@ -569,6 +569,9 @@ int main(int argc, char *argv[])
 
     cout << endl;
 
+    // Currently does not work with multiple repeat runs. OpenCL reports buffer overflow.
+    // Need to look into this at some point...
+    //
     run_exblas("accumulator-only", sum_exblas_acc,     time_exblas_acc,    0, false);
     run_exblas("fpe2",             sum_exblas_fpe2,    time_exblas_fpe2,   2, false);
     run_exblas("fpe4",             sum_exblas_fpe4,    time_exblas_fpe4,   4, false);
@@ -583,8 +586,6 @@ int main(int argc, char *argv[])
     print_diff_nrr("parallel",    "fpe2",             sum_parallel, sum_exblas_fpe2);
     print_diff_nrr("parallel",    "fpe4",             sum_parallel, sum_exblas_fpe4);
     print_diff_nrr("parallel",    "fpe8ee",           sum_parallel, sum_exblas_fpe8ee);
-
-    cout << endl;
 
     print_time_speedup(time_sequential, time_parallel);
 
