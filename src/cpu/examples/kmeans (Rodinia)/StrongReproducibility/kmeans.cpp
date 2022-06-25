@@ -252,6 +252,8 @@ int main(int argc, char **argv)
 
     memcpy(attributes[0], buf, numObjects * numAttributes * sizeof(float));
 
+    /* TODO: Pass FPE and early-exit parameters */
+
     run(nrepeats, false, false, numObjects, numAttributes, attributes, nclusters, threshold, cluster_centres_seq, time_seq);
     run(nrepeats, false, true, numObjects, numAttributes, attributes, nclusters, threshold, cluster_centres_seq_rep, time_seq_rep);
     run(nrepeats, true, false, numObjects, numAttributes, attributes, nclusters, threshold, cluster_centres_omp, time_omp);

@@ -44,11 +44,11 @@
 #endif
 
 /* cluster.c */
-int cluster(bool, bool, int, int, float **, int, float, float ***);
+int cluster(bool, bool, int, int, float **, int, float, float ***, const int fpe = 0, const bool early_exit = false);
 
 /* kmeans_clustering.c */
-float **kmeans_clustering_seq(bool, float **, int, int, int, float, int *);
-float **kmeans_clustering_omp(bool, float **, int, int, int, float, int *);
+float **kmeans_clustering_seq(bool, float **, int, int, int, float, int *, const int fpe = 0, const bool early_exit = false);
+float **kmeans_clustering_omp(bool, float **, int, int, int, float, int *, const int fpe = 0, const bool early_exit = false);
 float euclid_dist_2(float *, float *, int);
 int find_nearest_point(float *, int, float **, int);
 

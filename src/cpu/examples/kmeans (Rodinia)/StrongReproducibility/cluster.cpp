@@ -79,7 +79,8 @@ int cluster(bool parallel,                  /* use parallel or sequential implem
             int numAttributes,              /* size of attribute of each object */
             float **attributes,             /* [numObjects][numAttributes] */
             int nclusters, float threshold, /* in:   */
-            float ***cluster_centres)       /* out: [best_nclusters][numAttributes] */
+            float ***cluster_centres,       /* out: [best_nclusters][numAttributes] */
+            const int fpe, const bool early_exit)
 {
     int *membership;
     float **tmp_cluster_centres;
@@ -89,9 +90,9 @@ int cluster(bool parallel,                  /* use parallel or sequential implem
     srand(7);
 
     if (parallel) {
-        tmp_cluster_centres = kmeans_clustering_omp(reproducible, attributes, numAttributes, numObjects, nclusters, threshold, membership);
+        tmp_cluster_centres = kmeans_clustering_omp(reproducible, attributes, numAttributes, numObjects, nclusters, threshold, membership, fpe, early_exit);
     } else {
-        tmp_cluster_centres = kmeans_clustering_seq(reproducible, attributes, numAttributes, numObjects, nclusters, threshold, membership);
+        tmp_cluster_centres = kmeans_clustering_seq(reproducible, attributes, numAttributes, numObjects, nclusters, threshold, membership, fpe, early_exit);
     }
 
     if (*cluster_centres) {
