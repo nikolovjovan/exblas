@@ -7,7 +7,7 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -march=native -fabi-version=
 
 # Add TBB.
 #
-set (EXTRA_LIBS ${EXTRA_LIBS} tbb -L/opt/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/ /opt/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/libtbb.so)
+set (EXTRA_LIBS ${EXTRA_LIBS} tbb -L/home/jovan/intel/oneapi/tbb/latest/lib/intel64/gcc4.8 /home/jovan/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/libtbb.so)
 
 # Add the EXBLAS library.
 #

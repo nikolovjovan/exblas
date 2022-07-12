@@ -64,6 +64,8 @@ if (EXBLAS_VS_MPFR)
     set (EXTRA_LIBS ${EXTRA_LIBS} mpfr)
 endif (EXBLAS_VS_MPFR)
 
+target_include_directories (exblas PUBLIC "/usr/local/cuda/include/")
+
 add_subdirectory (blas1)
 add_subdirectory (blas2)
 add_subdirectory (blas3)

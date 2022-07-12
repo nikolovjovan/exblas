@@ -1,10 +1,6 @@
-# Update compiler flags.
+# Link math and OpenCL library.
 #
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
-
-# Link math library.
-#
-set (EXTRA_LIBS ${EXTRA_LIBS} m)
+set (EXTRA_LIBS ${EXTRA_LIBS} m OpenCL)
 
 # Set target name base.
 #
@@ -16,7 +12,7 @@ set (EXAMPLE_TARGET_DIR ${PROJECT_BINARY_DIR}/examples/gpu/${EXAMPLE_TARGET_NAME
 
 # Traverse example versions.
 #
-add_subdirectory (StrongReproducibility)
+add_subdirectory (WeakReproducibility)
 
 # Copy input data files during install.
 #

@@ -54,8 +54,8 @@ if (EXBLAS_VS_MPFR)
     set (EXTRA_LIBS ${EXTRA_LIBS} mpfr)
 endif (EXBLAS_VS_MPFR)
 
-target_include_directories (exblas PUBLIC "/opt/intel/oneapi/tbb/latest/include/")
-target_link_libraries (exblas -L/opt/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/)
-target_link_libraries (exblas /opt/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/libtbb.so)
+target_include_directories (exblas PUBLIC "/home/jovan/intel/oneapi/tbb/latest/include/")
+target_link_libraries (exblas -L/home/jovan/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/)
+target_link_libraries (exblas /home/jovan/intel/oneapi/tbb/latest/lib/intel64/gcc4.8/libtbb.so)
 
 add_subdirectory (blas1)

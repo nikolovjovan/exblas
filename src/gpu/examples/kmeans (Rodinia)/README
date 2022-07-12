@@ -1,41 +1,9 @@
-The original {C,OpenMP} code for kmeans was obtained from Minebench.
+NOTE: The current Kmeans implementation doesn't use texture/constant memories, and is different from the CUDA implementation.
 
-The Minebench license:
+******Adjustable work group size*****
+RD_WG_SIZE_0 or RD_WG_SIZE_0_0 for kernel_swap
+RD_WG_SIZE_1 or RD_WG_SIZE_1_0 for kernel_kmeans 
 
-IMPORTANT:  READ BEFORE DOWNLOADING, COPYING, INSTALLING OR USING.
-By downloading, copying, installing or using the software you agree
-to this license.  If you do not agree to this license, do not download,
-install, copy or use the software.
-
-
-Copyright (c) 2005 Northwestern University
-All rights reserved.
-
-Redistribution of the software in source and binary forms,
-with or without modification, is permitted provided that the
-following conditions are met: 
-
-1       Redistributions of source code must retain the above copyright
-        notice, this list of conditions and the following disclaimer. 
-
-2       Redistributions in binary form must reproduce the above copyright
-        notice, this list of conditions and the following disclaimer in the
-        documentation and/or other materials provided with the distribution. 
-
-3       Neither the name of Northwestern University nor the names of its
-        contributors may be used to endorse or promote products derived
-        from this software without specific prior written permission.
- 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS ``AS
-IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, NON-INFRINGEMENT AND
-FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
-NORTHWESTERN UNIVERSITY OR ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
-INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
-HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
-STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-POSSIBILITY OF SUCH DAMAGE.
-
+USAGE:
+make clean
+make KERNEL_DIM="-DRD_WG_SIZE_0=128 -DRD_WG_SIZE_1=512"
