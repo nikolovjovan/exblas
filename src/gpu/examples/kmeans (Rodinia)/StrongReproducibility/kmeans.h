@@ -48,11 +48,11 @@
 float euclid_dist_2(float *, float *, int);
 int find_nearest_point(float *, int, float **, int);
 float rms_err(float **, int, int, float **, int);
-int cluster(int, int, float **, int, int, float, int *, float ***, float *, int, int);
+int cluster(bool, int, int, float **, int, int, float, int *, float ***, float *, int, int, const int fpe = 0, const bool early_exit = false);
 int setup(int argc, char **argv);
 int allocate(int npoints, int nfeatures, int nclusters, float **feature);
 void deallocateMemory();
-int kmeansOCL(float **feature, int nfeatures, int npoints, int nclusters, int *membership, float **clusters, int *new_centers_len, float **new_centers);
-float **kmeans_clustering(float **feature, int nfeatures, int npoints, int nclusters, float threshold, int *membership);
+int* calculate_membership(int n_features, int n_points, int n_clusters, float **clusters);
+float **kmeans_clustering(bool reproducible, float **feature, int nfeatures, int npoints, int nclusters, float threshold, int *membership, const int fpe = 0, const bool early_exit = false);
 
 #endif

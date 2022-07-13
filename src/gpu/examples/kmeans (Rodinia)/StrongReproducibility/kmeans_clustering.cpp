@@ -68,24 +68,33 @@
 #include <omp.h>
 #include "kmeans.h"
 
+#include "blas1.hpp"
+#include "common.hpp"
+
 #define RANDOM_MAX 2147483647
 
 extern double wtime(void);
 
 /*----< kmeans_clustering() >---------------------------------------------*/
-float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
+float **kmeans_clustering(bool reproducible, /* use reproducible implementation */
+						  float **feature, /* in: [npoints][nfeatures] */
 						  int nfeatures,
 						  int npoints,
 						  int nclusters,
 						  float threshold,
-						  int *membership) /* out: [npoints] */
+						  int *membership, /* out: [npoints] */
+						  const int fpe, const bool early_exit)
 {
-	int i, j, n = 0; /* counters */
+	int i, j, index, n = 0; /* counters */
 	int loop = 0, temp;
+
+	int *new_membership;  /* [npoints] new membership of each point */
 	int *new_centers_len; /* [nclusters]: no. of points in each cluster */
 	float delta;		  /* if the point moved */
 	float **clusters;	  /* out: [nclusters][nfeatures] */
 	float **new_centers;  /* [nclusters][nfeatures] */
+    double *dbl_new_features;   // array of feature f of points nearest to current cluster
+                                // used to sum all features of points belonging to a cluster at once
 
 	int *initial; /* used to hold the index of points not yet selected
 					 prevents the "birthday problem" of dual selection (?)
@@ -143,20 +152,68 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 	for (i = 1; i < nclusters; i++)
 		new_centers[i] = new_centers[i - 1] + nfeatures;
 
+    if (reproducible) {
+        /* allocate space for temporary feature array */
+        dbl_new_features = (double *) malloc(npoints * sizeof(double));
+    }
+
 	/* iterate until convergence */
 	do
 	{
 		delta = 0.0;
 
-		delta = (float)kmeansOCL(feature,		  /* in: [npoints][nfeatures] */
-								 nfeatures,		  /* number of attributes for each point */
-								 npoints,		  /* number of data points */
-								 nclusters,		  /* number of clusters */
-								 membership,	  /* which cluster the point belongs to */
-								 clusters,		  /* out: [nclusters][nfeatures] */
-								 new_centers_len, /* out: number of points in each cluster */
-								 new_centers	  /* sum of points in each cluster */
-		);
+		new_membership = calculate_membership(nfeatures,	/* number of attributes for each point */
+											  npoints,		/* number of data points */
+											  nclusters,	/* number of clusters */
+											  clusters);	/* out: [nclusters][nfeatures] */
+
+		for (i = 0; i < npoints; i++)
+		{
+			int cluster_id = new_membership[i];
+			new_centers_len[cluster_id]++;
+		
+			if (new_membership[i] != membership[i])
+			{
+				delta++;
+				membership[i] = new_membership[i];
+			}
+
+			if (!reproducible)
+			{
+				for (j = 0; j < nfeatures; j++)
+				{
+					new_centers[cluster_id][j] += feature[i][j];
+				}
+			}
+		}
+
+		if (reproducible)
+		{
+			for (index = 0; index < nclusters; index++)
+			{
+				/* update new cluster centers : sum of objects located within */
+				for (j = 0; j < nfeatures; j++)
+				{
+					n = 0; // number of features in current dbl_new_features array (goes to new_centers_len[index])
+					for (i = 0; i < npoints; i++)
+					{
+						if (membership[i] == index)
+						{ // point i belongs to cluster index
+							dbl_new_features[n++] = feature[i][j];
+						}
+					}
+					// printf("exsum run\n");
+					new_centers[index][j] = static_cast<float>(exsum(
+						/* Ng */ new_centers_len[index],
+						/* ag */ dbl_new_features,
+						/* inca */ 1,
+						/* offset */ 0,
+						/* fpe */ fpe,
+						/* early_exit */ early_exit,
+						/* parallel */ false));
+				}
+			}
+		}
 
 		/* replace old cluster centers with new_centers */
 		/* CPU side of reduction */
@@ -175,6 +232,10 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 	} while ((delta > threshold) && (loop++ < 500)); /* makes sure loop terminates */
 
 	printf("iterated %d times\n", c);
+
+    if (reproducible) {
+        free(dbl_new_features);
+    }
 
 	free(new_centers[0]);
 	free(new_centers);

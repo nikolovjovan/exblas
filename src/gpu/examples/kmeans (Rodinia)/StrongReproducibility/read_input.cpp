@@ -264,9 +264,12 @@ int setup(int argc, char **argv)
 
 	/* ======================= core of the clustering ===================*/
 
+	// TODO: Add call without reproducible implementation and comparison...
+
 	// cluster_timing = omp_get_wtime();		/* Total clustering time */
 	cluster_centres = NULL;
-	index = cluster(npoints,	   /* number of data points */
+	index = cluster(/* reproducible */ true,
+					npoints,	   /* number of data points */
 					nfeatures,	   /* number of features for each point */
 					features,	   /* array: [npoints][nfeatures] */
 					min_nclusters, /* range of min to max number of clusters */

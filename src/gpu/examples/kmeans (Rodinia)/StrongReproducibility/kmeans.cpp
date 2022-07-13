@@ -298,17 +298,12 @@ int main(int argc, char **argv)
 	shutdown();
 }
 
-int kmeansOCL(float **feature, /* in: [npoints][nfeatures] */
-			  int n_features,
-			  int n_points,
-			  int n_clusters,
-			  int *membership,
-			  float **clusters,
-			  int *new_centers_len,
-			  float **new_centers)
+int* calculate_membership(int n_features,
+						  int n_points,
+						  int n_clusters,
+						  float **clusters)
 {
-	int delta = 0;
-	int i, j, k;
+	int i, j;
 	cl_int err = 0;
 
 	size_t global_work[3] = {n_points, 1, 1};
@@ -322,7 +317,7 @@ int kmeansOCL(float **feature, /* in: [npoints][nfeatures] */
 	if (err != CL_SUCCESS)
 	{
 		printf("ERROR: clEnqueueWriteBuffer d_cluster (size:%d) => %d\n", n_points, err);
-		return -1;
+		return nullptr;
 	}
 
 	int size = 0;
@@ -341,7 +336,7 @@ int kmeansOCL(float **feature, /* in: [npoints][nfeatures] */
 	if (err != CL_SUCCESS)
 	{
 		printf("ERROR: clEnqueueNDRangeKernel()=>%d failed\n", err);
-		return -1;
+		return nullptr;
 	}
 
 	clFinish(cmd_queue);
@@ -350,26 +345,8 @@ int kmeansOCL(float **feature, /* in: [npoints][nfeatures] */
 	if (err != CL_SUCCESS)
 	{
 		printf("ERROR: Memcopy Out\n");
-		return -1;
+		return nullptr;
 	}
 
-	delta = 0;
-	for (i = 0; i < n_points; i++)
-	{
-		int cluster_id = membership_OCL[i];
-		new_centers_len[cluster_id]++;
-	
-		if (membership_OCL[i] != membership[i])
-		{
-			delta++;
-			membership[i] = membership_OCL[i];
-		}
-	
-		for (j = 0; j < n_features; j++)
-		{
-			new_centers[cluster_id][j] += feature[i][j];
-		}
-	}
-
-	return delta;
+	return membership_OCL;
 }

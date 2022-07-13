@@ -514,7 +514,7 @@ void run_exblas(const char type[], float& result, uint64_t& time, const int fpe 
         }
         if (run_idx < repeat_count) {
             // Shuffle element vector to incur variability
-            shuffle(elements->begin(), elements->end(), *shuffle_engine);
+            shuffle(dbl_elements->begin(), dbl_elements->end(), *shuffle_engine);
             // auto time_loop = chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() -
             // start).count(); cout << "Run " << run_idx << ". passed! Time elapsed: " << time_loop << " [us] (" <<
             // fixed << setprecision(10) << (float) time_loop / 1000.0 << " [ms])" << endl;
@@ -569,9 +569,6 @@ int main(int argc, char *argv[])
 
     cout << endl;
 
-    // Currently does not work with multiple repeat runs. OpenCL reports buffer overflow.
-    // Need to look into this at some point...
-    //
     run_exblas("accumulator-only", sum_exblas_acc,     time_exblas_acc,    0, false);
     run_exblas("fpe2",             sum_exblas_fpe2,    time_exblas_fpe2,   2, false);
     run_exblas("fpe4",             sum_exblas_fpe4,    time_exblas_fpe4,   4, false);

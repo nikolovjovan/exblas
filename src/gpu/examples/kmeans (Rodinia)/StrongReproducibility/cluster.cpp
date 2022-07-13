@@ -79,7 +79,8 @@ extern double wtime(void);
 /* reference min_rmse value */
 
 /*---< cluster() >-----------------------------------------------------------*/
-int cluster(int npoints,	   /* number of data points */
+int cluster(bool reproducible, /* use reproducible implementation */
+			int npoints,	   /* number of data points */
 			int nfeatures,	   /* number of attributes for each point */
 			float **features,  /* array: [npoints][nfeatures] */
 			int min_nclusters, /* range of min to max number of clusters */
@@ -89,7 +90,8 @@ int cluster(int npoints,	   /* number of data points */
 			float ***cluster_centres, /* out: [best_nclusters][nfeatures] */
 			float *min_rmse,		  /* out: minimum RMSE */
 			int isRMSE,				  /* calculate RMSE */
-			int nloops)				  /* number of iteration for each number of clusters */
+			int nloops,				  /* number of iteration for each number of clusters */
+			const int fpe, const bool early_exit)
 {
 	int nclusters;				 /* number of clusters k */
 	int index = 0;				 /* number of iteration to reach the best RMSE */
@@ -114,7 +116,8 @@ int cluster(int npoints,	   /* number of data points */
 		for (i = 0; i < nloops; i++)
 		{
 			/* initialize initial cluster centers, CUDA calls (@ kmeans_cuda.cu) */
-			tmp_cluster_centres = kmeans_clustering(features,
+			tmp_cluster_centres = kmeans_clustering(reproducible,
+													features,
 													nfeatures,
 													npoints,
 													nclusters,

@@ -325,7 +325,7 @@ void run_sequential_reproducible(const char type[], float& result, uint64_t& tim
         }
         if (run_idx < repeat_count) {
             // Shuffle element vector to incur variability
-            shuffle(elements->begin(), elements->end(), *shuffle_engine);
+            shuffle(dbl_elements->begin(), dbl_elements->end(), *shuffle_engine);
             // auto time_loop = chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() -
             // start).count(); cout << "Run " << run_idx << ". passed! Time elapsed: " << time_loop << " [us] (" <<
             // fixed << setprecision(10) << (float) time_loop / 1000.0 << " [ms])" << endl;
