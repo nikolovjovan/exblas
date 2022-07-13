@@ -1,24 +1,6 @@
 # Copyright (c) 2013-2015 Inria and University Pierre and Marie Curie
 # All rights reserved.
 
-# Generate GPU specific library relying upon OpenCL.
-
-# Architecture specific flags.
-#
-option (EXBLAS_GPU_AMD "By setting this option we enable compilation for AMD GPUs" OFF)
-option (EXBLAS_GPU_NVIDIA "By setting this option we enable compilation for NVIDIA GPUs" OFF)
-if (EXBLAS_GPU_AMD)
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -masm=att -DAMD")
-    include_directories( "/opt/sdks/amd/current/include/" )
-    link_directories ( "/opt/sdks/amd/current/lib/x86_64/" )
-elseif (EXBLAS_GPU_NVIDIA)
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -masm=intel")
-    include_directories( "$ENV{CUDA_HOME}/include/" )
-    link_directories ( "$ENV{CUDA_HOME}/lib64/" )
-endif (EXBLAS_GPU_AMD)
-
-set (EXTRA_LIBS ${EXTRA_LIBS} OpenCL)
-
 # Enabling timing.
 #
 option (EXBLAS_TIMING "Enable/disable timing of our routines using cpu cycles" OFF)
@@ -63,8 +45,6 @@ if (EXBLAS_VS_MPFR)
     set (EXTRA_LIBS ${EXTRA_LIBS} gmp)
     set (EXTRA_LIBS ${EXTRA_LIBS} mpfr)
 endif (EXBLAS_VS_MPFR)
-
-target_include_directories (exblas PUBLIC "/usr/local/cuda/include/")
 
 add_subdirectory (blas1)
 add_subdirectory (blas2)
