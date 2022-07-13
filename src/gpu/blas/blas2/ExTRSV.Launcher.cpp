@@ -35,13 +35,14 @@ static cl_command_queue cqDefaultCommandQue; //Default command queue
 static cl_mem           d_sync;
 static cl_mem           d_Superaccs;
 
-#ifdef AMD
-static char  compileOptions[256] = "-DUSE_KNUTH -DBLOCK_SIZE=32 -Dthreadsx=32 -Dthreadsy=1";
-#else
-//static char  compileOptions[256] = "-DNVIDIA -DUSE_KNUTH -DBLOCK_SIZE=32 -Dthreadsx=32 -Dthreadsy=1 -cl-mad-enable -cl-fast-relaxed-math"; // -cl-nv-verbose";
-static char  compileOptions[256] = "-DNVIDIA -DUSE_KNUTH -DBLOCK_SIZE=32 -Dthreadsx=32 -Dthreadsy=1 -cl-mad-enable";
-#endif
+static char compileOptions[256];
 
+#ifdef AMD
+const char compileOptionsFormat[256] = "-DUSE_KNUTH -DBLOCK_SIZE=32 -Dthreadsx=32 -Dthreadsy=1 -DNBFPE=%d -DN=%d";
+#else
+//const char compileOptionsFormat[256] = "-DNVIDIA -DUSE_KNUTH -DBLOCK_SIZE=32 -Dthreadsx=32 -Dthreadsy=1 -cl-mad-enable -cl-fast-relaxed-math -DNBFPE=%d -DN=%d"; // -cl-nv-verbose";
+const char compileOptionsFormat[256] = "-DNVIDIA -DUSE_KNUTH -DBLOCK_SIZE=32 -Dthreadsx=32 -Dthreadsy=1 -cl-mad-enable -DNBFPE=%d -DN=%d";
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // GPU reduction related functions
@@ -80,9 +81,8 @@ extern "C" cl_int initExTRSV(
         }
 
     //printf("...building ExTRSV program\n");
-        char compileOptionsBak[256];
-        sprintf(compileOptionsBak, "%s -DNBFPE=%d -DN=%d", compileOptions, NbFPE % 10, n / BLOCK_SIZE);
-        ciErrNum = clBuildProgram(cpProgram, 0, NULL, compileOptionsBak, NULL, NULL);
+        sprintf(compileOptions, compileOptionsFormat, NbFPE % 10, n / BLOCK_SIZE);
+        ciErrNum = clBuildProgram(cpProgram, 0, NULL, compileOptions, NULL, NULL);
         if (ciErrNum != CL_SUCCESS) {
             printf("ciErrNum = %d\n", ciErrNum);
             printf("Error in clBuildProgram, Line %u in file %s !!!\n\n", __LINE__, __FILE__);

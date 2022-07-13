@@ -23,12 +23,13 @@ static cl_program       cpProgram;            //OpenCL Superaccumulator program
 static cl_kernel        ckMatrixMul;
 static cl_command_queue cqDefaultCommandQue;  //Default command queue for Superaccumulator
 
-#ifdef AMD
-static char  compileOptions[256] = "-DBLOCK_SIZE=16 -DUSE_KNUTH";
-#else
-static char  compileOptions[256] = "-DBLOCK_SIZE=32 -DUSE_KNUTH -DNVIDIA -cl-mad-enable -cl-fast-relaxed-math";
-#endif
+static char compileOptions[256];
 
+#ifdef AMD
+const char compileOptionsFormat[256] = "-DBLOCK_SIZE=16 -DUSE_KNUTH -DNBFPE=%d";
+#else
+const char compileOptionsFormat[256] = "-DBLOCK_SIZE=32 -DUSE_KNUTH -DNVIDIA -cl-mad-enable -cl-fast-relaxed-math -DNBFPE=%d";
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // GPU related functions
@@ -65,7 +66,7 @@ extern "C" cl_int initExGEMM(
         }
 
     //printf("...building program\n");
-        sprintf(compileOptions, "%s -DNBFPE=%d", compileOptions, NbFPE);
+        sprintf(compileOptions, compileOptionsFormat, NbFPE);
         ciErrNum = clBuildProgram(cpProgram, 0, NULL, compileOptions, NULL, NULL);
         if (ciErrNum != CL_SUCCESS) {
             printf("Error in clBuildProgram, Line %u in file %s !!!\n\n", __LINE__, __FILE__);

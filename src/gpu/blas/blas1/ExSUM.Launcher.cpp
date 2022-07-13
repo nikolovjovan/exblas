@@ -33,13 +33,13 @@ static const uint WORKGROUP_SIZE          = 256;
 static const uint MERGE_WORKGROUP_SIZE    = 64;
 static const uint MERGE_SUPERACCS_SIZE    = 128;
 static uint NbElements;
+static char compileOptions[256];
 
 #ifdef AMD
-static char  compileOptions[256] = "-DWARP_COUNT=16 -DWARP_SIZE=16 -DMERGE_WORKGROUP_SIZE=64 -DMERGE_SUPERACCS_SIZE=128 -DUSE_KNUTH";
+const char compileOptionsFormat[256] = "-DWARP_COUNT=16 -DWARP_SIZE=16 -DMERGE_WORKGROUP_SIZE=64 -DMERGE_SUPERACCS_SIZE=128 -DUSE_KNUTH -DNBFPE=%d";
 #else
-static char  compileOptions[256] = "-DWARP_COUNT=16 -DWARP_SIZE=16 -DMERGE_WORKGROUP_SIZE=64 -DMERGE_SUPERACCS_SIZE=128 -DUSE_KNUTH -DNVIDIA -cl-mad-enable -cl-fast-relaxed-math"; // -cl-nv-verbose";
+const char compileOptionsFormat[256] = "-DWARP_COUNT=16 -DWARP_SIZE=16 -DMERGE_WORKGROUP_SIZE=64 -DMERGE_SUPERACCS_SIZE=128 -DUSE_KNUTH -DNVIDIA -cl-mad-enable -cl-fast-relaxed-math -DNBFPE=%d"; // -cl-nv-verbose";
 #endif
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // GPU reduction related functions
@@ -79,7 +79,7 @@ extern "C" cl_int initExSUM(
         }
 
     //printf("...building ExSUM program\n");
-        sprintf(compileOptions, "%s -DNBFPE=%d", compileOptions, NbFPE);
+        sprintf(compileOptions, compileOptionsFormat, NbFPE);
         ciErrNum = clBuildProgram(cpProgram, 0, NULL, compileOptions, NULL, NULL);
         if (ciErrNum != CL_SUCCESS) {
             printf("Error in clBuildProgram, Line %u in file %s !!!\n\n", __LINE__, __FILE__);

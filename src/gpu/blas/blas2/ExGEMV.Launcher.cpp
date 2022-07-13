@@ -27,13 +27,13 @@ static cl_mem           d_Superaccs;
 static uint p;
 
 static const uint WORKGROUP_SIZE = 256;
+static char compileOptions[256];
 
 #ifdef AMD
-static char  compileOptions[256] = "-DUSE_KNUTH -DWORKGROUP_SIZE=256";
+const char compileOptionsFormat[256] = "-DUSE_KNUTH -DWORKGROUP_SIZE=256 -DNBFPE=%d";
 #else
-static char  compileOptions[256] = "-DNVIDIA -DUSE_KNUTH -DWORKGROUP_SIZE=256 -cl-mad-enable -cl-fast-relaxed-math"; // -cl-nv-verbose";
+const char compileOptionsFormat[256] = "-DNVIDIA -DUSE_KNUTH -DWORKGROUP_SIZE=256 -cl-mad-enable -cl-fast-relaxed-math -DNBFPE=%d"; // -cl-nv-verbose";
 #endif
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // GPU reduction related functions
@@ -75,9 +75,8 @@ extern "C" cl_int initExGEMV(
         }
 
     //printf("...building ExGEMV program\n");
-        char compileOptionsBak[256];
-        sprintf(compileOptionsBak, "%s -DNBFPE=%d", compileOptions, NbFPE);
-        ciErrNum = clBuildProgram(cpProgram, 0, NULL, compileOptionsBak, NULL, NULL);
+        sprintf(compileOptions, compileOptionsFormat, NbFPE);
+        ciErrNum = clBuildProgram(cpProgram, 0, NULL, compileOptions, NULL, NULL);
         if (ciErrNum != CL_SUCCESS) {
             printf("Error in clBuildProgram, Line %u in file %s !!!\n\n", __LINE__, __FILE__);
 
