@@ -43,19 +43,19 @@ void inputData(
     int _dim = dim[0];
     int _pad = pad[0];
     int _nzcnt_len = nzcnt_len[0];
-    
+
     *h_data = (float *) malloc(_len * sizeof (float));
     fread (*h_data, sizeof (float), _len, fid);
-    
+
     *h_indices = (int *) malloc(_len * sizeof (int));
     fread (*h_indices, sizeof (int), _len, fid);
-    
+
     *h_ptr = (int *) malloc(_depth * sizeof (int));
     fread (*h_ptr, sizeof (int), _depth, fid);
-    
+
     *h_perm = (int *) malloc(_dim * sizeof (int));
     fread (*h_perm, sizeof (int), _dim, fid);
-    
+
     *h_nzcnt = (int *) malloc(_nzcnt_len * sizeof (int));
     fread (*h_nzcnt, sizeof (int), _nzcnt_len, fid);
 

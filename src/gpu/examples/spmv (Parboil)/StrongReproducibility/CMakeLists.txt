@@ -18,7 +18,7 @@ add_executable (${EXAMPLE_TARGET_NAME} ${EXAMPLE_FILES})
 
 # Link libraries.
 #
-target_link_libraries (${EXAMPLE_TARGET_NAME} $<TARGET_OBJECTS:binned> $<TARGET_OBJECTS:binnedBLAS> $<TARGET_OBJECTS:reproBLAS> ${EXTRA_LIBS})
+target_link_libraries (${EXAMPLE_TARGET_NAME} ${EXTRA_LIBS})
 
 # Fix install RPATH.
 #
@@ -28,6 +28,7 @@ set_target_properties (${EXAMPLE_TARGET_NAME} PROPERTIES
 # Add install targets.
 #
 install (TARGETS ${EXAMPLE_TARGET_NAME} DESTINATION ${EXAMPLE_TARGET_DIR})
+install (FILES kernel.cl DESTINATION ${EXAMPLE_TARGET_DIR})
 
 # Add CMake tests to execute examples to verify default execution does not crash if option is specified.
 #

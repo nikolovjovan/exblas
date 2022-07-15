@@ -6,34 +6,35 @@
  *cr
  ***************************************************************************/
 
-#include "parboil.h"
-
+#include <CL/cl.h>
+#include <CL/cl_ext.h>
 #include <cstdio>
-#include <cstring>
+#include <cstdlib>
 #include <random>
 
+#include "parboil.h"
 #include "file.h"
+#include "gpu_info.h"
+#include "ocl.h"
 #include "convert_dataset.h"
-
-#include <omp.h>
-#include "../../../../config.h"
-#include <binned.h>
 
 using namespace std;
 
 constexpr uint32_t DEFAULT_SEED = 1549813198;
 constexpr uint32_t DEFAULT_NUMBER_OF_RUNS = 50;
 
-bool generate_vector (float *x_vector, int dim, uint32_t seed)
+bool generate_vector(float *x_vector, int dim, uint32_t seed)
 {
-    if (nullptr == x_vector) {
+    if (nullptr == x_vector)
+    {
         return false;
     }
 
     mt19937 gen(seed);
     uniform_real_distribution<float> float_dist(0.f, 1.f);
 
-    for (int i = 0; i < dim; i++) {
+    for (int i = 0; i < dim; i++)
+    {
         x_vector[i] = float_dist(gen);
     }
 
@@ -48,243 +49,242 @@ bool diff(int dim, float *h_Ax_vector_1, float *h_Ax_vector_2)
     return false;
 }
 
-void spmv_seq (bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
-               float *h_x_vector, int *h_perm, float *h_Ax_vector)
-{
-    float sum = 0.0f;
-    float_binned* sum_binned = binned_sballoc(SIDEFAULTFOLD);
-
-    // Consider creating a random map by creating an array 0..dim - 1 and randomly shuffling it
-    // for each execution. This should provide required randomness given the order of operations
-    // is sequential at the moment.
-    //
-    for (int i = 0; i < dim; i++) {
-        if (reproducible) {
-            binned_sbsetzero(SIDEFAULTFOLD, sum_binned);
-        } else {
-            sum = 0.0f;
-        }
-
-        int bound = h_nzcnt[i];
-
-        for (int k = 0; k < bound; k++) {
-            int j = h_ptr[k] + i;
-            int in = h_indices[j];
-
-            float d = h_data[j];
-            float t = h_x_vector[in];
-
-            if (reproducible) {
-                binned_sbsadd(SIDEFAULTFOLD, d * t, sum_binned);
-            } else {
-                sum += d * t;
-            }
-        }
-
-        if (reproducible) {
-            h_Ax_vector[h_perm[i]] = binned_ssbconv(SIDEFAULTFOLD, sum_binned);
-        } else {
-            h_Ax_vector[h_perm[i]] = sum;
-        }
-    }
-
-    free(sum_binned);
-}
-
-void spmv_omp (bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
-               float *h_x_vector, int *h_perm, float *h_Ax_vector)
-{
-#pragma omp parallel
-{
-    float sum = 0.0f;
-    float_binned* sum_binned = binned_sballoc(SIDEFAULTFOLD);
-
-    // Consider creating a random map by creating an array 0..dim - 1 and randomly shuffling it
-    // for each execution. This should provide required randomness given the order of operations
-    // is sequential at the moment.
-    //
-#pragma omp for
-    for (int i = 0; i < dim; i++) {
-        if (reproducible) {
-            binned_sbsetzero(SIDEFAULTFOLD, sum_binned);
-        } else {
-            sum = 0.0f;
-        }
-
-        int bound = h_nzcnt[i];
-
-        for (int k = 0; k < bound; k++) {
-            int j = h_ptr[k] + i;
-            int in = h_indices[j];
-
-            float d = h_data[j];
-            float t = h_x_vector[in];
-
-            if (reproducible) {
-                binned_sbsadd(SIDEFAULTFOLD, d * t, sum_binned);
-            } else {
-                sum += d * t;
-            }
-        }
-
-        if (reproducible) {
-            h_Ax_vector[h_perm[i]] = binned_ssbconv(SIDEFAULTFOLD, sum_binned);
-        } else {
-            h_Ax_vector[h_perm[i]] = sum;
-        }
-    }
-
-    free(sum_binned);
-}
-}
-
-void execute (uint32_t nruns, bool parallel, bool reproducible, int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
-              float *h_x_vector, int *h_perm, float *h_Ax_vector, double &time)
-{
-    printf("Running %s (%sreproducible) implementation...\n", parallel ? "parallel" : "sequential", reproducible ? "" : "non-");
-
-    time = 0.0f;
-
-    float *tmp_h_Ax_vector = new float[dim];
-
-    for (int i = 0; i < nruns; ++i) {
-        if (i == 0)
-            time = omp_get_wtime();
-        if (parallel)
-            spmv_omp(reproducible, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, tmp_h_Ax_vector);
-        else
-            spmv_seq(reproducible, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, tmp_h_Ax_vector);
-        if (i == 0) {
-            time = omp_get_wtime() - time;
-            memcpy (h_Ax_vector, tmp_h_Ax_vector, dim * sizeof (float));
-        } else if (diff(dim, h_Ax_vector, tmp_h_Ax_vector)) {
-            printf("%s (%sreproducible) implementation not reproducible after %d runs!\n",
-                    parallel ? "Parallel" : "Sequential", reproducible ? "" : "non-", i);
-            break;
-        }
-    }
-
-    delete[] tmp_h_Ax_vector;
-}
-
-int main (int argc, char** argv)
+int main(int argc, char **argv)
 {
     struct pb_TimerSet timers;
     struct pb_Parameters *parameters;
-    
-    printf ("CPU-based sparse matrix vector multiplication****\n");
-    printf ("Original version by Li-Wen Chang <lchang20@illinois.edu> and Shengzhao Wu<wu14@illinois.edu>\n");
-    printf ("This version maintained by Chris Rodrigues  ***********\n");
 
-    parameters = pb_ReadParameters (&argc, argv);
-    if (parameters->inpFiles[0] == NULL) {
-        fprintf (stderr, "Expecting one input filename.\n");
-        exit (-1);
+    printf("OpenCL accelerated sparse matrix vector multiplication****\n");
+    printf("Original version by Li-Wen Chang <lchang20@illinois.edu> and Shengzhao Wu<wu14@illinois.edu>\n");
+    printf("This version maintained by Chris Rodrigues  ***********\n");
+
+    parameters = pb_ReadParameters(&argc, argv);
+    if (parameters->inpFiles[0] == NULL)
+    {
+        fprintf(stderr, "Expecting one input filename\n");
+        exit(-1);
     }
 
-    pb_InitializeTimerSet (&timers);
-    pb_SwitchToTimer (&timers, pb_TimerID_COMPUTE);
+    pb_InitializeTimerSet(&timers);
+    pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
 
-    // Parameters declaration
-    //
+    // parameters declaration
+    cl_int clStatus;
+    cl_platform_id clPlatform;
+    clStatus = clGetPlatformIDs(1, &clPlatform, NULL);
+    CHECK_ERROR("clGetPlatformIDs")
+
+    cl_context_properties clCps[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)clPlatform, 0};
+
+    cl_device_id clDevice;
+    clStatus = clGetDeviceIDs(clPlatform, CL_DEVICE_TYPE_GPU, 1, &clDevice, NULL);
+    CHECK_ERROR("clGetDeviceIDs")
+
+    cl_context clContext = clCreateContextFromType(clCps, CL_DEVICE_TYPE_GPU, NULL, NULL, &clStatus);
+    CHECK_ERROR("clCreateContextFromType")
+
+    cl_command_queue clCommandQueue = clCreateCommandQueue(clContext, clDevice, CL_QUEUE_PROFILING_ENABLE, &clStatus);
+    CHECK_ERROR("clCreateCommandQueue")
+
+    pb_SetOpenCL(&clContext, &clCommandQueue);
+
+    const char *clSource[] = {readFile("./kernel.cl")};
+    cl_program clProgram = clCreateProgramWithSource(clContext, 1, clSource, NULL, &clStatus);
+    CHECK_ERROR("clCreateProgramWithSource")
+
+    char clOptions[50];
+    sprintf(clOptions, "");
+    clStatus = clBuildProgram(clProgram, 1, &clDevice, clOptions, NULL, NULL);
+    CHECK_ERROR("clBuildProgram")
+
+    cl_kernel clKernel = clCreateKernel(clProgram, "spmv_jds_naive", &clStatus);
+    CHECK_ERROR("clCreateKernel")
+
     int len;
     int depth;
     int dim;
-    int pad=1;
+    int pad = 32;
     int nzcnt_len;
 
-    // Host memory allocation
-    // Matrix
-    //
+    // host memory allocation
+    // matrix
     float *h_data;
     int *h_indices;
     int *h_ptr;
     int *h_perm;
     int *h_nzcnt;
-
-    // Vector
-    //
-    float *h_Ax_vector_seq, *h_Ax_vector_seq_rep, *h_Ax_vector_omp, *h_Ax_vector_omp_rep;
+    // vector
+    float *h_Ax_vector;
     float *h_x_vector;
 
-    // Load matrix from files
-    //
-    pb_SwitchToTimer (&timers, pb_TimerID_IO);
+    // device memory allocation
+    // matrix
+    cl_mem d_data;
+    cl_mem d_indices;
+    cl_mem d_ptr;
+    cl_mem d_perm;
+    cl_mem d_nzcnt;
 
+    // vector
+    cl_mem d_Ax_vector;
+    cl_mem d_x_vector;
+
+    cl_mem jds_ptr_int;
+    cl_mem sh_zcnt_int;
+
+    // load matrix from files
+    pb_SwitchToTimer(&timers, pb_TimerID_IO);
+    // inputData(parameters->inpFiles[0], &len, &depth, &dim,&nzcnt_len,&pad,
+    //     &h_data, &h_indices, &h_ptr,
+    //     &h_perm, &h_nzcnt);
     int col_count;
     coo_to_jds(
         parameters->inpFiles[0], // bcsstk32.mtx, fidapm05.mtx, jgl009.mtx
-        1, // row padding
-        pad, // warp size
-        1, // pack size
-        1, // debug level [0:2]
+        1,                       // row padding
+        pad,                     // warp size
+        1,                       // pack size
+        1,                       // debug level [0:2]
         &h_data, &h_ptr, &h_nzcnt, &h_indices, &h_perm,
-        &col_count, &dim, &len, &nzcnt_len, &depth
-    );
+        &col_count, &dim, &len, &nzcnt_len, &depth);
 
-    h_Ax_vector_seq = new float[dim];
-    h_Ax_vector_seq_rep = new float[dim];
-    h_Ax_vector_omp = new float[dim];
-    h_Ax_vector_omp_rep = new float[dim];
+    //	pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
 
+    h_Ax_vector = new float[dim];
     h_x_vector = new float[dim];
 
     uint32_t seed = parameters->seed == 0 ? DEFAULT_SEED : parameters->seed;
     uint32_t nruns = parameters->nruns == 0 ? DEFAULT_NUMBER_OF_RUNS : parameters->nruns;
 
-    if (!generate_vector(h_x_vector, dim, seed)) {
+    if (!generate_vector(h_x_vector, dim, seed))
+    {
         fprintf(stderr, "Failed to generate dense vector.\n");
         exit(-1);
     }
 
     pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
+    OpenCLDeviceProp clDeviceProp;
+    //	clStatus = clGetDeviceInfo(clDevice,CL_DEVICE_COMPUTE_CAPABILITY_MAJOR_NV,sizeof(cl_uint),&(clDeviceProp.major),NULL);
+    // CHECK_ERROR("clGetDeviceInfo")
+    //	clStatus = clGetDeviceInfo(clDevice,CL_DEVICE_COMPUTE_CAPABILITY_MINOR_NV,sizeof(cl_uint),&(clDeviceProp.minor),NULL);
+    //      CHECK_ERROR("clGetDeviceInfo")
+    clStatus = clGetDeviceInfo(clDevice, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(cl_uint), &(clDeviceProp.multiProcessorCount), NULL);
+    CHECK_ERROR("clGetDeviceInfo")
 
-    double time_seq, time_omp, time_seq_rep, time_omp_rep;
+    pb_SwitchToTimer(&timers, pb_TimerID_COPY);
+    // memory allocation
+    d_data = clCreateBuffer(clContext, CL_MEM_READ_ONLY, len * sizeof(float), NULL, &clStatus);
+    CHECK_ERROR("clCreateBuffer")
+    d_indices = clCreateBuffer(clContext, CL_MEM_READ_ONLY, len * sizeof(int), NULL, &clStatus);
+    CHECK_ERROR("clCreateBuffer")
+    d_perm = clCreateBuffer(clContext, CL_MEM_READ_ONLY, dim * sizeof(int), NULL, &clStatus);
+    CHECK_ERROR("clCreateBuffer")
+    d_x_vector = clCreateBuffer(clContext, CL_MEM_READ_ONLY, dim * sizeof(float), NULL, &clStatus);
+    CHECK_ERROR("clCreateBuffer")
+    d_Ax_vector = clCreateBuffer(clContext, CL_MEM_WRITE_ONLY, dim * sizeof(float), NULL, &clStatus);
+    CHECK_ERROR("clCreateBuffer")
 
-    execute (nruns, false, false, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq, time_seq);
-    execute (nruns, false, true, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq_rep, time_seq_rep);
-    execute (nruns, true, false, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_omp, time_omp);
-    execute (nruns, true, true, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_omp_rep, time_omp_rep);
+    jds_ptr_int = clCreateBuffer(clContext, CL_MEM_READ_ONLY, 5000 * sizeof(int), NULL, &clStatus);
+    CHECK_ERROR("clCreateBuffer")
+    sh_zcnt_int = clCreateBuffer(clContext, CL_MEM_READ_ONLY, 5000 * sizeof(int), NULL, &clStatus);
+    CHECK_ERROR("clCreateBuffer")
 
-    printf("Non-reproducible sequential and parallel results %smatch!\n",
-           diff(dim, h_Ax_vector_seq, h_Ax_vector_omp) ? "do not " : "");
+    clMemSet(clCommandQueue, d_Ax_vector, 0, dim * sizeof(float));
 
-    printf("Reproducible sequential and parallel results %smatch!\n",
-           diff(dim, h_Ax_vector_seq_rep, h_Ax_vector_omp_rep) ? "do not " : "");
+    // memory copy
+    clStatus = clEnqueueWriteBuffer(clCommandQueue, d_data, CL_FALSE, 0, len * sizeof(float), h_data, 0, NULL, NULL);
+    CHECK_ERROR("clEnqueueWriteBuffer")
+    clStatus = clEnqueueWriteBuffer(clCommandQueue, d_indices, CL_FALSE, 0, len * sizeof(int), h_indices, 0, NULL, NULL);
+    CHECK_ERROR("clEnqueueWriteBuffer")
+    clStatus = clEnqueueWriteBuffer(clCommandQueue, d_perm, CL_FALSE, 0, dim * sizeof(int), h_perm, 0, NULL, NULL);
+    CHECK_ERROR("clEnqueueWriteBuffer")
+    clStatus = clEnqueueWriteBuffer(clCommandQueue, d_x_vector, CL_FALSE, 0, dim * sizeof(int), h_x_vector, 0, NULL, NULL);
+    CHECK_ERROR("clEnqueueWriteBuffer")
 
-    if (diff(dim, h_Ax_vector_seq, h_Ax_vector_seq_rep)) {
-        printf("Non-reproducible and reproducible sequential results do not match!\n");
+    clStatus = clEnqueueWriteBuffer(clCommandQueue, jds_ptr_int, CL_FALSE, 0, depth * sizeof(int), h_ptr, 0, NULL, NULL);
+    CHECK_ERROR("clEnqueueWriteBuffer")
+    clStatus = clEnqueueWriteBuffer(clCommandQueue, sh_zcnt_int, CL_TRUE, 0, nzcnt_len * sizeof(int), h_nzcnt, 0, NULL, NULL);
+    CHECK_ERROR("clEnqueueWriteBuffer")
+
+    pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
+
+    size_t grid;
+    size_t block;
+
+    compute_active_thread(&block, &grid, nzcnt_len, pad, clDeviceProp.major, clDeviceProp.minor, clDeviceProp.multiProcessorCount);
+    //  printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!grid is %d and block is %d=\n",grid,block);
+    //  printf("!!! dim is %d\n",dim);
+
+    clStatus = clSetKernelArg(clKernel, 0, sizeof(cl_mem), &d_Ax_vector);
+    CHECK_ERROR("clSetKernelArg")
+    clStatus = clSetKernelArg(clKernel, 1, sizeof(cl_mem), &d_data);
+    CHECK_ERROR("clSetKernelArg")
+    clStatus = clSetKernelArg(clKernel, 2, sizeof(cl_mem), &d_indices);
+    CHECK_ERROR("clSetKernelArg")
+    clStatus = clSetKernelArg(clKernel, 3, sizeof(cl_mem), &d_perm);
+    CHECK_ERROR("clSetKernelArg")
+    clStatus = clSetKernelArg(clKernel, 4, sizeof(cl_mem), &d_x_vector);
+    CHECK_ERROR("clSetKernelArg")
+    clStatus = clSetKernelArg(clKernel, 5, sizeof(int), &dim);
+    CHECK_ERROR("clSetKernelArg")
+
+    clStatus = clSetKernelArg(clKernel, 6, sizeof(cl_mem), &jds_ptr_int);
+    CHECK_ERROR("clSetKernelArg")
+    clStatus = clSetKernelArg(clKernel, 7, sizeof(cl_mem), &sh_zcnt_int);
+    CHECK_ERROR("clSetKernelArg")
+
+    // main execution
+    pb_SwitchToTimer(&timers, pb_TimerID_KERNEL);
+
+    int i;
+    for (i = 0; i < 50; i++)
+    {
+        clStatus = clEnqueueNDRangeKernel(clCommandQueue, clKernel, 1, NULL, &grid, &block, 0, NULL, NULL);
+        CHECK_ERROR("clEnqueueNDRangeKernel")
     }
 
-    if (diff(dim, h_Ax_vector_omp, h_Ax_vector_omp_rep)) {
-        printf("Non-reproducible and reproducible parallel results do not match!\n");
+    clStatus = clFinish(clCommandQueue);
+    CHECK_ERROR("clFinish")
+
+    pb_SwitchToTimer(&timers, pb_TimerID_COPY);
+    // HtoD memory copy
+    clStatus = clEnqueueReadBuffer(clCommandQueue, d_Ax_vector, CL_TRUE, 0, dim * sizeof(float), h_Ax_vector, 0, NULL, NULL);
+    CHECK_ERROR("clEnqueueReadBuffer")
+
+    clStatus = clReleaseKernel(clKernel);
+    clStatus = clReleaseProgram(clProgram);
+
+    clStatus = clReleaseMemObject(d_data);
+    clStatus = clReleaseMemObject(d_indices);
+    clStatus = clReleaseMemObject(d_perm);
+    clStatus = clReleaseMemObject(d_nzcnt);
+    clStatus = clReleaseMemObject(d_x_vector);
+    clStatus = clReleaseMemObject(d_Ax_vector);
+    CHECK_ERROR("clReleaseMemObject")
+
+    clStatus = clReleaseCommandQueue(clCommandQueue);
+    clStatus = clReleaseContext(clContext);
+
+    if (parameters->outFile)
+    {
+        pb_SwitchToTimer(&timers, pb_TimerID_IO);
+        outputData(parameters->outFile, h_Ax_vector, dim);
     }
 
-    printf("Sequential implementation time: %.3f\n", time_seq);
-    printf("Parallel implementation time: %.3f\n", time_omp);
-    printf("Speedup: %.3f\n", time_seq / time_omp);
+    pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
 
-    printf("Sequential implementation time (reproducible): %.3f\n", time_seq_rep);
-    printf("Parallel implementation time (reproducible): %.3f\n", time_omp_rep);
-    printf("Speedup (reproducible): %.3f\n", time_seq_rep / time_omp_rep);
-
-    printf("Time sequential reproducible / non-reproducible: %.3f\n", time_seq_rep / time_seq);
-    printf("Time parallel reproducible / non-reproducible: %.3f\n", time_omp_rep / time_omp);
+    free((void *)clSource[0]);
 
     delete[] h_data;
     delete[] h_indices;
     delete[] h_ptr;
     delete[] h_perm;
     delete[] h_nzcnt;
-    delete[] h_Ax_vector_seq;
-    delete[] h_Ax_vector_seq_rep;
-    delete[] h_Ax_vector_omp;
-    delete[] h_Ax_vector_omp_rep;
+    delete[] h_Ax_vector;
     delete[] h_x_vector;
 
     pb_SwitchToTimer(&timers, pb_TimerID_NONE);
-    pb_PrintTimerSet(&timers);
 
+    pb_PrintTimerSet(&timers);
     pb_FreeParameters(parameters);
 
     return 0;
