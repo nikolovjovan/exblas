@@ -18,7 +18,7 @@ add_executable (${EXAMPLE_TARGET_NAME} ${EXAMPLE_FILES})
 
 # Link libraries.
 #
-target_link_libraries (${EXAMPLE_TARGET_NAME} $<TARGET_OBJECTS:binned> $<TARGET_OBJECTS:binnedBLAS> $<TARGET_OBJECTS:reproBLAS> ${EXTRA_LIBS})
+target_link_libraries (${EXAMPLE_TARGET_NAME} ${EXTRA_LIBS})
 
 # Fix install RPATH.
 #

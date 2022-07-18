@@ -9,7 +9,8 @@
 #ifndef _UDTYPES_H__
 #define _UDTYPES_H__
 
-typedef struct {
+typedef struct
+{
     int numSamples;
     int aquisitionMatrixSize[3];
     int reconstructionMatrixSize[3];
@@ -21,7 +22,8 @@ typedef struct {
     int useLUT;
 } parameters;
 
-typedef struct {
+typedef struct
+{
     float real;
     float imag;
     float kX;
@@ -30,7 +32,8 @@ typedef struct {
     float sdc;
 } ReconstructionSample;
 
-typedef struct {
+typedef struct
+{
     float real;
     float imag;
 } cmplx;

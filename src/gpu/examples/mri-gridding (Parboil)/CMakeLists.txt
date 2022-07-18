@@ -1,10 +1,10 @@
-# Update compiler flags.
+# Disable optimizations as there seems to be a seg fault with -O1...
 #
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
 
-# Link math library.
+# Link math and OpenCL library.
 #
-set (EXTRA_LIBS ${EXTRA_LIBS} m)
+set (EXTRA_LIBS ${EXTRA_LIBS} m OpenCL)
 
 # Set target name base.
 #

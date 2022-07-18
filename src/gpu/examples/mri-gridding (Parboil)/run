@@ -1,1 +1,1 @@
-./mri-gridding ../data/small/small.uks 32
+./mri-gridding -i ../data/small/small.uks 32
