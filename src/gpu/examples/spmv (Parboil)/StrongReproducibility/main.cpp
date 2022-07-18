@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <chrono>
 #include <random>
 
@@ -19,6 +20,9 @@
 #include "gpu_info.h"
 #include "ocl.h"
 #include "convert_dataset.h"
+
+#include "blas1.hpp"
+#include "common.hpp"
 
 using namespace std;
 
@@ -85,7 +89,7 @@ bool diff(int dim, float *h_Ax_vector_1, float *h_Ax_vector_2)
     return false;
 }
 
-void initOCL()
+void init_ocl()
 {
     clStatus = clGetPlatformIDs(1, &clPlatform, NULL);
     CHECK_ERROR("clGetPlatformIDs")
@@ -135,7 +139,7 @@ void initOCL()
     CHECK_ERROR("clCreateBuffer")
 }
 
-void cleanupOCL()
+void cleanup_ocl()
 {
     clStatus = clReleaseKernel(clKernel);
     clStatus |= clReleaseProgram(clProgram);
@@ -155,9 +159,8 @@ void cleanupOCL()
     CHECK_ERROR("Failed to release OpenCL resources!\n")
 }
 
-void spmv(bool reproducible, const int fpe, const bool early_exit,
-          int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
-          float *h_x_vector, int *h_perm, float *h_Ax_vector)
+void spmv_ocl(int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
+              float *h_x_vector, int *h_perm, float *h_Ax_vector)
 {
     pb_SwitchToTimer(&timers, pb_TimerID_COPY);
 
@@ -223,11 +226,94 @@ void spmv(bool reproducible, const int fpe, const bool early_exit,
     pb_SwitchToTimer(&timers, pb_TimerID_NONE);
 }
 
+void spmv_exsum (int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
+                 float *h_x_vector, int *h_perm, float *h_Ax_vector,
+                 const int fpe, const bool early_exit)
+{
+    double* dbl_products = (double*) malloc(dim * sizeof(double));
+
+    // Consider creating a random map by creating an array 0..dim - 1 and randomly shuffling it
+    // for each execution. This should provide required randomness given the order of operations
+    // is sequential at the moment.
+    //
+    for (int i = 0; i < dim; i++) {
+        int bound = h_nzcnt[i];
+
+        for (int k = 0; k < bound; k++) {
+            int j = h_ptr[k] + i;
+            int in = h_indices[j];
+
+            float d = h_data[j];
+            float t = h_x_vector[in];
+
+            dbl_products[k] = static_cast<double> (d) * t;
+        }
+
+        if (bound <= 0)
+        {
+            h_Ax_vector[h_perm[i]] = 0.0f;
+        }
+        else
+        {
+            h_Ax_vector[h_perm[i]] = static_cast<float> (exsum(
+            /* Ng */            bound,
+            /* ag */            dbl_products,
+            /* inca */          1,
+            /* offset */        0,
+            /* fpe */           fpe,
+            /* early_exit */    early_exit,
+            /* parallel */      false));
+        }
+    }
+
+    free(dbl_products);
+}
+
+
+void spmv(bool reproducible, const int fpe, const bool early_exit,
+          int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
+          float *h_x_vector, int *h_perm, float *h_Ax_vector)
+{
+    if (reproducible)
+    {
+        spmv_exsum(dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector, fpe, early_exit);
+    }
+    else
+    {
+        spmv_ocl(dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector);
+    }
+}
+
 void execute(uint32_t nruns, bool reproducible, const int fpe, const bool early_exit,
              int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
              float *h_x_vector, int *h_perm, float *h_Ax_vector, uint64_t &time)
 {
-    printf("Running %sreproducible implementation...\n", reproducible ? "" : "non-");
+    if (!reproducible)
+    {
+        init_ocl();
+
+        cout << "Running non-reproducible implementation...\n";
+    }
+    else
+    {
+        cout << "Running ";
+
+        if (fpe == 0)
+        {
+            cout << "acc";
+        }
+        else
+        {
+            cout << "fp" << fpe;
+
+            if (early_exit)
+            {
+                cout << "ee";
+            }
+        }
+
+        cout << " reproducible implementation...\n";
+    }
 
     chrono::steady_clock::time_point start;
 
@@ -256,6 +342,11 @@ void execute(uint32_t nruns, bool reproducible, const int fpe, const bool early_
     }
 
     delete[] tmp_h_Ax_vector;
+
+    if (!reproducible)
+    {
+        cleanup_ocl();
+    }
 }
 
 int main(int argc, char **argv)
@@ -275,38 +366,6 @@ int main(int argc, char **argv)
 
     pb_InitializeTimerSet(&timers);
     pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
-
-    // // parameters declaration
-    // cl_int clStatus;
-    // cl_platform_id clPlatform;
-    // clStatus = clGetPlatformIDs(1, &clPlatform, NULL);
-    // CHECK_ERROR("clGetPlatformIDs")
-
-    // cl_context_properties clCps[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)clPlatform, 0};
-
-    // cl_device_id clDevice;
-    // clStatus = clGetDeviceIDs(clPlatform, CL_DEVICE_TYPE_GPU, 1, &clDevice, NULL);
-    // CHECK_ERROR("clGetDeviceIDs")
-
-    // cl_context clContext = clCreateContextFromType(clCps, CL_DEVICE_TYPE_GPU, NULL, NULL, &clStatus);
-    // CHECK_ERROR("clCreateContextFromType")
-
-    // cl_command_queue clCommandQueue = clCreateCommandQueue(clContext, clDevice, CL_QUEUE_PROFILING_ENABLE, &clStatus);
-    // CHECK_ERROR("clCreateCommandQueue")
-
-    // pb_SetOpenCL(&clContext, &clCommandQueue);
-
-    // const char *clSource[] = {readFile("./kernel.cl")};
-    // cl_program clProgram = clCreateProgramWithSource(clContext, 1, clSource, NULL, &clStatus);
-    // CHECK_ERROR("clCreateProgramWithSource")
-
-    // char clOptions[50];
-    // sprintf(clOptions, "");
-    // clStatus = clBuildProgram(clProgram, 1, &clDevice, clOptions, NULL, NULL);
-    // CHECK_ERROR("clBuildProgram")
-
-    // cl_kernel clKernel = clCreateKernel(clProgram, "spmv_jds_naive", &clStatus);
-    // CHECK_ERROR("clCreateKernel")
 
     // host memory allocation
     // matrix
@@ -332,8 +391,6 @@ int main(int argc, char **argv)
         &h_data, &h_ptr, &h_nzcnt, &h_indices, &h_perm,
         &col_count, &dim, &len, &nzcnt_len, &depth);
 
-    //	pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
-
     h_Ax_vector = new float[dim];
     h_Ax_vector_acc = new float[dim];
     h_Ax_vector_fp2 = new float[dim];
@@ -355,15 +412,29 @@ int main(int argc, char **argv)
 
     uint64_t time_non_rep, time_acc, time_fp2, time_fp4, time_fp8ee;
 
-    initOCL();
-
     execute(nruns, false, 0, false, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector, time_non_rep);
+
+    delete[] h_data;
+    delete[] h_indices;
+    delete[] h_ptr;
+    delete[] h_perm;
+    delete[] h_nzcnt;
+
+    // need to reload matrix with warp size = 1 (cpu execution)
+    pad = 1;
+    coo_to_jds(
+        parameters->inpFiles[0], // bcsstk32.mtx, fidapm05.mtx, jgl009.mtx
+        1,                       // row padding
+        pad,                     // warp size
+        1,                       // pack size
+        1,                       // debug level [0:2]
+        &h_data, &h_ptr, &h_nzcnt, &h_indices, &h_perm,
+        &col_count, &dim, &len, &nzcnt_len, &depth);
+
     execute(nruns, true, 0, false, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_acc, time_acc);
     execute(nruns, true, 2, false, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_fp2, time_fp2);
     execute(nruns, true, 4, false, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_fp4, time_fp4);
     execute(nruns, true, 8, true, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_fp8ee, time_fp8ee);
-
-    cleanupOCL();
 
     if (diff(dim, h_Ax_vector, h_Ax_vector_acc))
     {
