@@ -1,7 +1,3 @@
-# Disable optimizations as there seems to be a seg fault with -O1...
-#
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
-
 # Link math and OpenCL library.
 #
 set (EXTRA_LIBS ${EXTRA_LIBS} m OpenCL)
@@ -17,6 +13,7 @@ set (EXAMPLE_TARGET_DIR ${PROJECT_BINARY_DIR}/examples/gpu/${EXAMPLE_TARGET_NAME
 # Traverse example versions.
 #
 add_subdirectory (StrongReproducibility)
+add_subdirectory (CPUStrongReproducibility)
 
 # Copy input data files during install.
 #

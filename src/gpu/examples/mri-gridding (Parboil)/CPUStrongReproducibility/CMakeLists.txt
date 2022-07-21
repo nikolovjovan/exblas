@@ -1,10 +1,10 @@
-# Disable optimizations as there seems to be a seg fault with -O1...
+# Update compiler flags.
 #
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
 
 # Set target name.
 #
-set (EXAMPLE_TARGET_NAME ${EXAMPLE_TARGET_NAME_BASE}_StrongReproducibility)
+set (EXAMPLE_TARGET_NAME ${EXAMPLE_TARGET_NAME_BASE}_CPUStrongReproducibility)
 
 # Grab the .c and .cpp files.
 #
@@ -32,12 +32,9 @@ set_target_properties (${EXAMPLE_TARGET_NAME} PROPERTIES
 # Add install targets.
 #
 install (TARGETS ${EXAMPLE_TARGET_NAME} DESTINATION ${EXAMPLE_TARGET_DIR})
-install (FILES GPU_kernels.cl DESTINATION ${EXAMPLE_TARGET_DIR})
-install (FILES scanLargeArray.cl DESTINATION ${EXAMPLE_TARGET_DIR})
-install (FILES sort.cl DESTINATION ${EXAMPLE_TARGET_DIR})
 
 # Add CMake tests to execute examples to verify default execution does not crash if option is specified.
 #
 if (TEST_EXAMPLES)
-    add_test (NAME ${EXAMPLE_TARGET_NAME} COMMAND ${EXAMPLE_TARGET_DIR}/${EXAMPLE_TARGET_NAME} -i ${EXAMPLE_TARGET_DIR}/data/small/small.uks 32)
+    add_test (NAME ${EXAMPLE_TARGET_NAME} COMMAND ${EXAMPLE_TARGET_DIR}/${EXAMPLE_TARGET_NAME} ${EXAMPLE_TARGET_DIR}/data/small/small.uks 32)
 endif ()
