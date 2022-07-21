@@ -35,4 +35,14 @@ typedef struct {
     float imag;
 } cmplx;
 
+typedef struct {
+    float* real_elements;
+    float* imag_elements;
+} cmplx_elements;
+
+typedef struct {
+    double* real_elements;
+    double* imag_elements;
+} cmplx_dbl_elements;
+
 #endif

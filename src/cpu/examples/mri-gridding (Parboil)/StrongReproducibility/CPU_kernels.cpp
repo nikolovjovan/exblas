@@ -16,8 +16,8 @@
 
 #include "UDTypes.h"
 
-#include "../../../../config.h"
-#include <binned.h>
+#include "blas1.hpp"
+#include "common.hpp"
 
 #define max(x, y) ((x < y) ? y : x)
 #define min(x, y) ((x > y) ? y : x)
@@ -122,7 +122,8 @@ float kernel_value_LUT(float v, float *LUT, int sizeLUT, float _1overCutoff2)
 }
 
 void gridding_seq(unsigned int n, parameters params, ReconstructionSample *sample, float *LUT, unsigned int sizeLUT,
-                  cmplx *gridData, float *sampleDensity, bool reproducible, double *time)
+                  cmplx *gridData, float *sampleDensity, bool reproducible, double *time,
+                  const int fpe = 0, const bool early_exit = false)
 {
     printf("Sequential (gold) implementation: %s!\n", reproducible ? "reproducible" : "non-reproducible");
 
@@ -163,97 +164,102 @@ void gridding_seq(unsigned int n, parameters params, ReconstructionSample *sampl
 
     float beta = PI * sqrt(4 * params.kernelWidth * params.kernelWidth / (params.oversample * params.oversample) * (params.oversample - .5) * (params.oversample - .5) - .8);
 
-    /* output buffers used for reproducible implementation */
-    float_binned **gridDataBinnedReal, **gridDataBinnedImag;
-    uint32_t gridNumElems = size_x * size_y * size_z;
+    unsigned int gridNumElems = size_x * size_y * size_z;
+
+    cmplx_dbl_elements *dbl_gridDataElements = NULL;
 
     if (reproducible) {
-        /* initialize output buffers */
-        gridDataBinnedReal = (float_binned **) malloc(gridNumElems * sizeof(float_binned *));
-        gridDataBinnedImag = (float_binned **) malloc(gridNumElems * sizeof(float_binned *));
-        for (int i = 0; i < gridNumElems; ++i) {
-            gridDataBinnedReal[i] = binned_sballoc(SIDEFAULTFOLD);
-            binned_sbsetzero(SIDEFAULTFOLD, gridDataBinnedReal[i]);
-            gridDataBinnedImag[i] = binned_sballoc(SIDEFAULTFOLD);
-            binned_sbsetzero(SIDEFAULTFOLD, gridDataBinnedImag[i]);
-        }
+        dbl_gridDataElements = (cmplx_dbl_elements *) calloc(size_x * size_y * size_z, sizeof(cmplx_dbl_elements));
     }
 
-    int i;
-    for (i = 0; i < n; i++) {
-        ReconstructionSample pt = sample[i];
+    // reproducible implementation needs a precomputation step
+    // to allocate temporary arrays for storing precomputed data before summation
+    //
+    int steps = reproducible ? 2 : 1;
 
-        float kx = pt.kX;
-        float ky = pt.kY;
-        float kz = pt.kZ;
+    for (int step = 0; step < steps; ++step)
+    {
+        for (int i = 0; i < n; i++) {
+            ReconstructionSample pt = sample[i];
 
-        NxL = max((kx - cutoff), 0.0);
-        NxH = min((kx + cutoff), size_x - 1.0);
+            float kx = pt.kX;
+            float ky = pt.kY;
+            float kz = pt.kZ;
 
-        NyL = max((ky - cutoff), 0.0);
-        NyH = min((ky + cutoff), size_y - 1.0);
+            NxL = max((kx - cutoff), 0.0);
+            NxH = min((kx + cutoff), size_x - 1.0);
 
-        NzL = max((kz - cutoff), 0.0);
-        NzH = min((kz + cutoff), size_z - 1.0);
+            NyL = max((ky - cutoff), 0.0);
+            NyH = min((ky + cutoff), size_y - 1.0);
 
-        if ((pt.real != 0.0 || pt.imag != 0.0) && pt.sdc != 0.0) {
-            for (dz2 = Dz2, nz = NzL; nz <= NzH; ++nz, ++dz2) {
-                *dz2 = ((kz - nz) * (kz - nz));
-            }
-            for (dx2 = Dx2, nx = NxL; nx <= NxH; ++nx, ++dx2) {
-                *dx2 = ((kx - nx) * (kx - nx));
-            }
-            for (dy2 = Dy2, ny = NyL; ny <= NyH; ++ny, ++dy2) {
-                *dy2 = ((ky - ny) * (ky - ny));
-            }
+            NzL = max((kz - cutoff), 0.0);
+            NzH = min((kz + cutoff), size_z - 1.0);
 
-            idxZ = (NzL - 1) * size_x * size_y;
-            for (dz2 = Dz2, nz = NzL; nz <= NzH; ++nz, ++dz2) {
-                /* linear offset into 3-D matrix to get to zposition */
-                idxZ += size_x * size_y;
+            if ((pt.real != 0.0 || pt.imag != 0.0) && pt.sdc != 0.0) {
+                for (dz2 = Dz2, nz = NzL; nz <= NzH; ++nz, ++dz2) {
+                    *dz2 = ((kz - nz) * (kz - nz));
+                }
+                for (dx2 = Dx2, nx = NxL; nx <= NxH; ++nx, ++dx2) {
+                    *dx2 = ((kx - nx) * (kx - nx));
+                }
+                for (dy2 = Dy2, ny = NyL; ny <= NyH; ++ny, ++dy2) {
+                    *dy2 = ((ky - ny) * (ky - ny));
+                }
 
-                idxY = (NyL - 1) * size_x;
+                idxZ = (NzL - 1) * size_x * size_y;
+                for (dz2 = Dz2, nz = NzL; nz <= NzH; ++nz, ++dz2) {
+                    /* linear offset into 3-D matrix to get to zposition */
+                    idxZ += size_x * size_y;
 
-                /* loop over x indexes, but only if curent distance is close enough (distance will increase by adding
-                 * x&y distance) */
-                if ((*dz2) < cutoff2) {
-                    for (dy2 = Dy2, ny = NyL; ny <= NyH; ++ny, ++dy2) {
-                        /* linear offset IN ADDITION to idxZ to get to Y position */
-                        idxY += size_x;
+                    idxY = (NyL - 1) * size_x;
 
-                        dy2dz2 = (*dz2) + (*dy2);
+                    /* loop over x indexes, but only if curent distance is close enough (distance will increase by adding
+                    * x&y distance) */
+                    if ((*dz2) < cutoff2) {
+                        for (dy2 = Dy2, ny = NyL; ny <= NyH; ++ny, ++dy2) {
+                            /* linear offset IN ADDITION to idxZ to get to Y position */
+                            idxY += size_x;
 
-                        idx0 = idxY + idxZ;
+                            dy2dz2 = (*dz2) + (*dy2);
 
-                        /* loop over y indexes, but only if curent distance is close enough (distance will increase by
-                         * adding y distance) */
-                        if (dy2dz2 < cutoff2) {
-                            for (dx2 = Dx2, nx = NxL; nx <= NxH; ++nx, ++dx2) {
-                                /* value to evaluate kernel at */
-                                v = dy2dz2 + (*dx2);
+                            idx0 = idxY + idxZ;
 
-                                if (v < cutoff2) {
-                                    /* linear index of (x,y,z) point */
-                                    idx = nx + idx0;
+                            /* loop over y indexes, but only if curent distance is close enough (distance will increase by
+                            * adding y distance) */
+                            if (dy2dz2 < cutoff2) {
+                                for (dx2 = Dx2, nx = NxL; nx <= NxH; ++nx, ++dx2) {
+                                    /* value to evaluate kernel at */
+                                    v = dy2dz2 + (*dx2);
 
-                                    /* kernel weighting value */
-                                    if (params.useLUT) {
-                                        w = kernel_value_LUT(v, LUT, sizeLUT, _1overCutoff2) * pt.sdc;
-                                    } else {
-                                        w = kernel_value_CPU(beta * sqrt(1.0 - (v * _1overCutoff2))) * pt.sdc;
+                                    if (v < cutoff2) {
+                                        /* linear index of (x,y,z) point */
+                                        idx = nx + idx0;
+
+                                        if (!reproducible || step == 1)
+                                        {
+                                            /* kernel weighting value */
+                                            if (params.useLUT) {
+                                                w = kernel_value_LUT(v, LUT, sizeLUT, _1overCutoff2) * pt.sdc;
+                                            } else {
+                                                w = kernel_value_CPU(beta * sqrt(1.0 - (v * _1overCutoff2))) * pt.sdc;
+                                            }
+                                        }
+
+                                        /* grid data */
+                                        if (!reproducible)
+                                        {
+                                            gridData[idx].real += (w * pt.real);
+                                            gridData[idx].imag += (w * pt.imag);
+                                        }
+                                        else if (step == 1)
+                                        {
+                                            dbl_gridDataElements[idx].real_elements[(size_t) sampleDensity[idx]] = (w * pt.real);
+                                            dbl_gridDataElements[idx].imag_elements[(size_t) sampleDensity[idx]] = (w * pt.imag);
+                                        }
+
+                                        /* estimate sample density */
+                                        sampleDensity[idx] += 1.0;
                                     }
-
-                                    /* grid data */
-                                    if (reproducible) {
-                                        binned_sbsadd(SIDEFAULTFOLD, w * pt.real, gridDataBinnedReal[idx]);
-                                        binned_sbsadd(SIDEFAULTFOLD, w * pt.imag, gridDataBinnedImag[idx]);
-                                    } else {
-                                        gridData[idx].real += (w * pt.real);
-                                        gridData[idx].imag += (w * pt.imag);
-                                    }
-
-                                    /* estimate sample density */
-                                    sampleDensity[idx] += 1.0;
                                 }
                             }
                         }
@@ -261,25 +267,58 @@ void gridding_seq(unsigned int n, parameters params, ReconstructionSample *sampl
                 }
             }
         }
+
+        if (reproducible && step == 0)
+        {
+            for (idx = 0; idx < gridNumElems; ++idx)
+            {
+                // allocate elements for summation only for points that have samples
+                if (sampleDensity[idx] > 0) {
+                    dbl_gridDataElements[idx].real_elements = (double *) malloc((size_t) sampleDensity[idx] * sizeof(double));
+                    dbl_gridDataElements[idx].imag_elements = (double *) malloc((size_t) sampleDensity[idx] * sizeof(double));
+                }
+
+                // reset sample density to keep track of elements below
+                sampleDensity[idx] = 0;
+            }
+        }
+    }
+
+    if (reproducible)
+    {
+        // compute grid data by summing calculated contributions
+        for (idx = 0; idx < gridNumElems; ++idx)
+        {
+            if (sampleDensity[idx] > 0) {
+                gridData[idx].real = static_cast<float> (exsum(
+                    /* Ng */            (int) sampleDensity[idx],
+                    /* ag */            dbl_gridDataElements[idx].real_elements,
+                    /* inca */          1,
+                    /* offset */        0,
+                    /* fpe */           fpe,
+                    /* early_exit */    early_exit,
+                    /* parallel */      false));
+
+                gridData[idx].imag = static_cast<float> (exsum(
+                    /* Ng */            (int) sampleDensity[idx],
+                    /* ag */            dbl_gridDataElements[idx].imag_elements,
+                    /* inca */          1,
+                    /* offset */        0,
+                    /* fpe */           fpe,
+                    /* early_exit */    early_exit,
+                    /* parallel */      false));
+
+                // cleanup
+                free(dbl_gridDataElements[idx].real_elements);
+                free(dbl_gridDataElements[idx].imag_elements);
+            }
+        }
+
+        // cleanup
+        free(dbl_gridDataElements);
     }
 
     *time = omp_get_wtime() - tstart;
-
-    if (reproducible) {
-        /* convert temp data to output data */
-        for (i = 0; i < gridNumElems; ++i) {
-            gridData[i].real = binned_ssbconv(SIDEFAULTFOLD, gridDataBinnedReal[i]);
-            gridData[i].imag = binned_ssbconv(SIDEFAULTFOLD, gridDataBinnedImag[i]);
-
-            /* free allocated memory */
-            free(gridDataBinnedReal[i]);
-            free(gridDataBinnedImag[i]);
-        }
-
-        /* free allocated memory */
-        free(gridDataBinnedReal);
-        free(gridDataBinnedImag);
-    }
 }
 
 /**
@@ -291,14 +330,14 @@ void gridding_seq(unsigned int n, parameters params, ReconstructionSample *sampl
  * count it returns the same result every time. However, the returned result may not be accurate.
  */
 void gridding_omp_mem(unsigned int n, parameters params, ReconstructionSample *sample, float *LUT, unsigned int sizeLUT,
-                      cmplx *gridData, float *sampleDensity, bool reproducible, double *time)
+                      cmplx *gridData, float *sampleDensity, double *time)
 {
-    printf("Parallel implementation using thread-local output buffers: %s!\n", reproducible ? "reproducible" : "non-reproducible");
+    printf("Parallel implementation using thread-local output buffers: non-reproducible!\n");
 
     int numThreads = omp_get_max_threads();
 
     if (numThreads == 1) {
-        gridding_seq(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, reproducible, time);
+        gridding_seq(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, /* reproducible */ false, time);
         return;
     }
 
@@ -353,34 +392,14 @@ void gridding_omp_mem(unsigned int n, parameters params, ReconstructionSample *s
     cmplx **tGridData;
     float **tSampleDensity;
 
-    float_binned ***tGridDataBinnedReal, ***tGridDataBinnedImag;
+    tGridData = (cmplx **) calloc(numThreads, sizeof(cmplx *));
 
-    if (reproducible) {
-        /* initialize output buffers */
-        tGridDataBinnedReal = (float_binned ***) malloc(numThreads * sizeof(float_binned **));
-        tGridDataBinnedImag = (float_binned ***) malloc(numThreads * sizeof(float_binned **));
+    /* no need to allocate output buffers for thread with id 0, use already allocated buffers */
+    tGridData[0] = gridData;
 
-        /* all threads require output buffer allocation */
-        for (i = 0; i < numThreads; ++i) {
-            tGridDataBinnedReal[i] = (float_binned **) malloc(gridNumElems * sizeof(float_binned *));
-            tGridDataBinnedImag[i] = (float_binned **) malloc(gridNumElems * sizeof(float_binned *));
-            for (int j = 0; j < gridNumElems; ++j) {
-                tGridDataBinnedReal[i][j] = binned_sballoc(SIDEFAULTFOLD);
-                binned_sbsetzero(SIDEFAULTFOLD, tGridDataBinnedReal[i][j]);
-                tGridDataBinnedImag[i][j] = binned_sballoc(SIDEFAULTFOLD);
-                binned_sbsetzero(SIDEFAULTFOLD, tGridDataBinnedImag[i][j]);
-            }
-        }
-    } else {
-        tGridData = (cmplx **) calloc(numThreads, sizeof(cmplx *));
-
-        /* no need to allocate output buffers for thread with id 0, use already allocated buffers */
-        tGridData[0] = gridData;
-
-        /* other threads require output buffer allocation */
-        for (i = 1; i < numThreads; ++i) {
-            tGridData[i] = (cmplx *) calloc(gridNumElems, sizeof(cmplx));
-        }
+    /* other threads require output buffer allocation */
+    for (i = 1; i < numThreads; ++i) {
+        tGridData[i] = (cmplx *) calloc(gridNumElems, sizeof(cmplx));
     }
 
     tSampleDensity = (float **) calloc(numThreads, sizeof(float *));
@@ -397,7 +416,7 @@ void gridding_omp_mem(unsigned int n, parameters params, ReconstructionSample *s
 
 #pragma omp parallel default(none) \
         private(i, tid, pt, NxL, NxH, NyL, NyH, NzL, NzH, nx, ny, nz, w, idx, idx0, idxZ, idxY, Dx2, Dy2, Dz2, dx2, dy2, dz2, dy2dz2, v, start, end) \
-        shared(n, params, sample, LUT, sizeLUT, size_x, size_y, size_z, cutoff, cutoff2, _1overCutoff2, beta, tGridData, tSampleDensity, tGridDataBinnedReal, tGridDataBinnedImag, chunkSize, numThreads, reproducible)
+        shared(n, params, sample, LUT, sizeLUT, size_x, size_y, size_z, cutoff, cutoff2, _1overCutoff2, beta, tGridData, tSampleDensity, chunkSize, numThreads)
 {
     tid = omp_get_thread_num();
     start = tid * chunkSize;
@@ -463,13 +482,8 @@ void gridding_omp_mem(unsigned int n, parameters params, ReconstructionSample *s
                                     }
 
                                     /* grid data */
-                                    if (reproducible) {
-                                        binned_sbsadd(SIDEFAULTFOLD, w * pt.real, tGridDataBinnedReal[tid][idx]);
-                                        binned_sbsadd(SIDEFAULTFOLD, w * pt.imag, tGridDataBinnedImag[tid][idx]);
-                                    } else {
-                                        tGridData[tid][idx].real += (w * pt.real);
-                                        tGridData[tid][idx].imag += (w * pt.imag);
-                                    }
+                                    tGridData[tid][idx].real += (w * pt.real);
+                                    tGridData[tid][idx].imag += (w * pt.imag);
 
                                     /* estimate sample density */
                                     tSampleDensity[tid][idx] += 1.0;
@@ -491,7 +505,7 @@ void gridding_omp_mem(unsigned int n, parameters params, ReconstructionSample *s
     int j;
 #pragma omp parallel default(none) \
             private(i, j, tid, start, end) \
-            shared(gridNumElems, numThreads, gridData, tGridData, sampleDensity, tSampleDensity, chunkSize, reproducible, tGridDataBinnedReal, tGridDataBinnedImag)
+            shared(gridNumElems, numThreads, gridData, tGridData, sampleDensity, tSampleDensity, chunkSize)
 {
     tid = omp_get_thread_num();
     start = tid * chunkSize;
@@ -499,44 +513,18 @@ void gridding_omp_mem(unsigned int n, parameters params, ReconstructionSample *s
 
     for (i = start; i < end; ++i) {
         for (j = 1; j < numThreads; ++j) {
-            if (reproducible) {
-                binned_sbsbadd(SIDEFAULTFOLD, tGridDataBinnedReal[j][i], tGridDataBinnedReal[0][i]);
-                binned_sbsbadd(SIDEFAULTFOLD, tGridDataBinnedImag[j][i], tGridDataBinnedImag[0][i]);
-
-                /* free allocated memory */
-                free(tGridDataBinnedReal[j][i]);
-                free(tGridDataBinnedImag[j][i]);
-            } else {
-                gridData[i].real += tGridData[j][i].real;
-                gridData[i].imag += tGridData[j][i].imag;
-            }
+            gridData[i].real += tGridData[j][i].real;
+            gridData[i].imag += tGridData[j][i].imag;
             sampleDensity[i] += tSampleDensity[j][i];
-        }
-        if (reproducible) {
-            gridData[i].real = binned_ssbconv(SIDEFAULTFOLD, tGridDataBinnedReal[0][i]);
-            gridData[i].imag = binned_ssbconv(SIDEFAULTFOLD, tGridDataBinnedImag[0][i]);
-
-            /* free allocated memory */
-            free(tGridDataBinnedReal[0][i]);
-            free(tGridDataBinnedImag[0][i]);
         }
     }
 }
 
     /* free allocated memory */
-    if (reproducible) {
-        for (i = 0; i < numThreads; ++i) {
-            free(tGridDataBinnedReal[i]);
-            free(tGridDataBinnedImag[i]);
-        }
-        free(tGridDataBinnedReal);
-        free(tGridDataBinnedImag);
-    } else {
-        for (i = 1; i < numThreads; ++i) {
-            free(tGridData[i]);
-        }
-        free(tGridData);
+    for (i = 1; i < numThreads; ++i) {
+        free(tGridData[i]);
     }
+    free(tGridData);
     for (i = 1; i < numThreads; ++i) {
         free(tSampleDensity[i]);
     }
@@ -553,14 +541,14 @@ constexpr int MAX_LOCK_COUNT = 10000;
  * reproducible and multiple runs with same thread count do not guarantee numerical reproducibility.
  */
 void gridding_omp_locks(unsigned int n, parameters params, ReconstructionSample *sample, float *LUT, unsigned int sizeLUT,
-                        cmplx *gridData, float *sampleDensity, bool reproducible, double *time)
+                        cmplx *gridData, float *sampleDensity, double *time)
 {
-    printf("Parallel implementation using locks: %s!\n", reproducible ? "reproducible" : "non-reproducible");
+    printf("Parallel implementation using locks: non-reproducible.\n");
 
     int numThreads = omp_get_max_threads();
 
     if (numThreads == 1) {
-        gridding_seq(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, reproducible, time);
+        gridding_seq(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, /* reproducible */ false, time);
         return;
     }
 
@@ -597,6 +585,8 @@ void gridding_omp_locks(unsigned int n, parameters params, ReconstructionSample 
     float cutoff2 = cutoff * cutoff;                     // square of cutoff radius
     float _1overCutoff2 = 1 / cutoff2;                   // 1 over square of cutoff radius
 
+    double tstart = omp_get_wtime();
+
     float beta = PI * sqrt(4 * params.kernelWidth * params.kernelWidth / (params.oversample * params.oversample) * (params.oversample - .5) * (params.oversample - .5) - .8);
 
     int i;
@@ -608,10 +598,8 @@ void gridding_omp_locks(unsigned int n, parameters params, ReconstructionSample 
     float tempGridDataReal;
     float tempGridDataImag;
 
-    float_binned **gridDataBinnedReal, **gridDataBinnedImag;
-
-    uint32_t gridNumElems = size_x * size_y * size_z;
-    uint32_t lockNum = MAX_LOCK_COUNT > gridNumElems ? gridNumElems : MAX_LOCK_COUNT;
+    unsigned int gridNumElems = size_x * size_y * size_z;
+    unsigned int lockNum = MAX_LOCK_COUNT > gridNumElems ? gridNumElems : MAX_LOCK_COUNT;
 
     omp_lock_t *locks = (omp_lock_t *) calloc(lockNum, sizeof(omp_lock_t));
     if (locks == NULL) {
@@ -623,23 +611,12 @@ void gridding_omp_locks(unsigned int n, parameters params, ReconstructionSample 
         omp_init_lock(&locks[i]);
     }
 
-    if (reproducible) {
-        /* initialize output buffers */
-        gridDataBinnedReal = (float_binned **) malloc(gridNumElems * sizeof(float_binned *));
-        gridDataBinnedImag = (float_binned **) malloc(gridNumElems * sizeof(float_binned *));
-        for (int i = 0; i < gridNumElems; ++i) {
-            gridDataBinnedReal[i] = binned_sballoc(SIDEFAULTFOLD);
-            binned_sbsetzero(SIDEFAULTFOLD, gridDataBinnedReal[i]);
-            gridDataBinnedImag[i] = binned_sballoc(SIDEFAULTFOLD);
-            binned_sbsetzero(SIDEFAULTFOLD, gridDataBinnedImag[i]);
-        }
-    }
-
-    double tstart = omp_get_wtime();
-
-#pragma omp parallel for default(none) \
+#pragma omp parallel default(none) \
             private(i, pt, NxL, NxH, NyL, NyH, NzL, NzH, nx, ny, nz, w, tempGridDataReal, tempGridDataImag, idx, idx0, idxZ, idxY, Dx2, Dy2, Dz2, dx2, dy2, dz2, dy2dz2, v) \
-            shared(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, size_x, size_y, size_z, cutoff, cutoff2, _1overCutoff2, beta, lockNum, locks, reproducible, gridDataBinnedReal, gridDataBinnedImag)
+            shared(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, size_x, size_y, size_z, cutoff, cutoff2, _1overCutoff2, beta, lockNum, locks)
+{
+
+#pragma omp for
     for (i = 0; i < n; i++) {
         pt = sample[i];
 
@@ -707,13 +684,8 @@ void gridding_omp_locks(unsigned int n, parameters params, ReconstructionSample 
                                     omp_set_lock(&locks[idx % lockNum]);
 
                                     /* grid data */
-                                    if (reproducible) {
-                                        binned_sbsadd(SIDEFAULTFOLD, tempGridDataReal, gridDataBinnedReal[idx]);
-                                        binned_sbsadd(SIDEFAULTFOLD, tempGridDataImag, gridDataBinnedImag[idx]);
-                                    } else {
-                                        gridData[idx].real += tempGridDataReal;
-                                        gridData[idx].imag += tempGridDataImag;
-                                    }
+                                    gridData[idx].real += tempGridDataReal;
+                                    gridData[idx].imag += tempGridDataImag;
 
                                     /* estimate sample density */
                                     sampleDensity[idx] += 1.0;
@@ -728,24 +700,9 @@ void gridding_omp_locks(unsigned int n, parameters params, ReconstructionSample 
             }
         }
     }
+}
 
     *time = omp_get_wtime() - tstart;
-
-    if (reproducible) {
-        /* convert temp data to output data */
-        for (i = 0; i < gridNumElems; ++i) {
-            gridData[i].real = binned_ssbconv(SIDEFAULTFOLD, gridDataBinnedReal[i]);
-            gridData[i].imag = binned_ssbconv(SIDEFAULTFOLD, gridDataBinnedImag[i]);
-
-            /* free allocated memory */
-            free(gridDataBinnedReal[i]);
-            free(gridDataBinnedImag[i]);
-        }
-
-        /* free allocated memory */
-        free(gridDataBinnedReal);
-        free(gridDataBinnedImag);
-    }
 
     /* free allocated memory */
     for (i = 0; i < lockNum; ++i) {
@@ -754,30 +711,254 @@ void gridding_omp_locks(unsigned int n, parameters params, ReconstructionSample 
     free(locks);
 }
 
-constexpr double MAX_MEM_USAGE_PERCENT = 0.8;
-
 void gridding_omp(unsigned int n, parameters params, ReconstructionSample *sample, float *LUT, unsigned int sizeLUT,
-                  cmplx *gridData, float *sampleDensity, bool reproducible, double *time)
+                  cmplx *gridData, float *sampleDensity, bool reproducible, double *time,
+                  const int fpe = 0, const bool early_exit = false)
 {
-    uint64_t gridNumElems = params.gridSize[0] * params.gridSize[1] * params.gridSize[2];
-    uint64_t numThreads = omp_get_max_threads();
+    printf("Parallel implementation: %s!\n", reproducible ? "reproducible" : "non-reproducible");
 
-    struct sysinfo memInfo;
-    sysinfo(&memInfo);
-    uint64_t totalMemSize = memInfo.totalram;
-    uint64_t requiredMemSize;
+    unsigned int numThreads = omp_get_max_threads();
+
+    if (numThreads == 1) {
+        gridding_seq(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, reproducible, time, fpe, early_exit);
+        return;
+    }
+
+    unsigned int chunkSize = (n + numThreads - 1) / numThreads;
+
+    unsigned int size_x = params.gridSize[0];
+    unsigned int size_y = params.gridSize[1];
+    unsigned int size_z = params.gridSize[2];
+
+    unsigned int gridNumElems = size_x * size_y * size_z;
+
+    float cutoff = ((float) (params.kernelWidth)) / 2.0; // cutoff radius
+    float cutoff2 = cutoff * cutoff;                     // square of cutoff radius
+    float _1overCutoff2 = 1 / cutoff2;                   // 1 over square of cutoff radius
+
+    float beta = PI * sqrt(4 * params.kernelWidth * params.kernelWidth / (params.oversample * params.oversample) * (params.oversample - .5) * (params.oversample - .5) - .8);
+
+    double tstart = omp_get_wtime();
+
+    cmplx_elements *gridDataElements = NULL;
+    unsigned int **tSampleDensity = NULL;
+
+    /* reproducible */
+    cmplx_dbl_elements *dbl_gridDataElements = NULL;
+
     if (reproducible) {
-        requiredMemSize = numThreads * gridNumElems * binned_sbsize(SIDEFAULTFOLD) * 2 + gridNumElems * (sizeof(cmplx) + sizeof(float));
+        dbl_gridDataElements = (cmplx_dbl_elements *) calloc(size_x * size_y * size_z, sizeof(cmplx_dbl_elements));
     } else {
-        requiredMemSize = numThreads * gridNumElems * (sizeof(cmplx) + sizeof(float));
+        gridDataElements = (cmplx_elements *) calloc(size_x * size_y * size_z, sizeof(cmplx_elements));
     }
 
-    printf("Available memory: %llu; Required memory: %llu\n", totalMemSize, requiredMemSize);
-
-    /* depending on required memory, use locks or thread-local memory implementation */
-    if (requiredMemSize > totalMemSize * MAX_MEM_USAGE_PERCENT) {
-        gridding_omp_locks(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, reproducible, time);
-    } else {
-        gridding_omp_mem(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, reproducible, time);
+    tSampleDensity = (unsigned int **) malloc(gridNumElems * sizeof(unsigned int *));
+    for (unsigned int idx = 0; idx < gridNumElems; ++idx) {
+        tSampleDensity[idx] = (unsigned int *) calloc(numThreads, sizeof(unsigned int));
     }
+
+#pragma omp parallel default(none) \
+            shared(n, params, sample, LUT, sizeLUT, gridData, sampleDensity, fpe, early_exit, numThreads, chunkSize, size_x, size_y, size_z, gridNumElems, cutoff, cutoff2, _1overCutoff2, beta, reproducible, gridDataElements, tSampleDensity, dbl_gridDataElements)
+{
+    unsigned int NxL, NxH;
+    unsigned int NyL, NyH;
+    unsigned int NzL, NzH;
+
+    int nx;
+    int ny;
+    int nz;
+
+    float w;
+    unsigned int idx;
+    unsigned int idx0;
+
+    unsigned int idxZ;
+    unsigned int idxY;
+
+    float Dx2[100];
+    float Dy2[100];
+    float Dz2[100];
+    float *dx2 = NULL;
+    float *dy2 = NULL;
+    float *dz2 = NULL;
+
+    float dy2dz2;
+    float v;
+
+    ReconstructionSample pt;
+
+    unsigned int tid = omp_get_thread_num();;
+    unsigned int start = tid * chunkSize;
+    unsigned int end = start + chunkSize;
+
+    unsigned int sum_prev;
+    unsigned int sum;
+
+    if (end > n) {
+        end = n;
+    }
+
+    for (int step = 0; step < 2; ++step)
+    {
+        for (int i = start; i < end; i++) {
+            pt = sample[i];
+
+            NxL = max((pt.kX - cutoff), 0.0);
+            NxH = min((pt.kX + cutoff), size_x - 1.0);
+
+            NyL = max((pt.kY - cutoff), 0.0);
+            NyH = min((pt.kY + cutoff), size_y - 1.0);
+
+            NzL = max((pt.kZ - cutoff), 0.0);
+            NzH = min((pt.kZ + cutoff), size_z - 1.0);
+
+            if ((pt.real != 0.0 || pt.imag != 0.0) && pt.sdc != 0.0) {
+                for (dz2 = Dz2, nz = NzL; nz <= NzH; ++nz, ++dz2) {
+                    *dz2 = ((pt.kZ - nz) * (pt.kZ - nz));
+                }
+                for (dx2 = Dx2, nx = NxL; nx <= NxH; ++nx, ++dx2) {
+                    *dx2 = ((pt.kX - nx) * (pt.kX - nx));
+                }
+                for (dy2 = Dy2, ny = NyL; ny <= NyH; ++ny, ++dy2) {
+                    *dy2 = ((pt.kY - ny) * (pt.kY - ny));
+                }
+
+                idxZ = (NzL - 1) * size_x * size_y;
+                for (dz2 = Dz2, nz = NzL; nz <= NzH; ++nz, ++dz2) {
+                    /* linear offset into 3-D matrix to get to zposition */
+                    idxZ += size_x * size_y;
+
+                    idxY = (NyL - 1) * size_x;
+
+                    /* loop over x indexes, but only if curent distance is close enough (distance will increase by adding
+                    * x&y distance) */
+                    if ((*dz2) < cutoff2) {
+                        for (dy2 = Dy2, ny = NyL; ny <= NyH; ++ny, ++dy2) {
+                            /* linear offset IN ADDITION to idxZ to get to Y position */
+                            idxY += size_x;
+
+                            dy2dz2 = (*dz2) + (*dy2);
+
+                            idx0 = idxY + idxZ;
+
+                            /* loop over y indexes, but only if curent distance is close enough (distance will increase by
+                            * adding y distance) */
+                            if (dy2dz2 < cutoff2) {
+                                for (dx2 = Dx2, nx = NxL; nx <= NxH; ++nx, ++dx2) {
+                                    /* value to evaluate kernel at */
+                                    v = dy2dz2 + (*dx2);
+
+                                    if (v < cutoff2) {
+                                        /* linear index of (x,y,z) point */
+                                        idx = nx + idx0;
+
+                                        if (step == 1)
+                                        {
+                                            /* kernel weighting value */
+                                            if (params.useLUT) {
+                                                w = kernel_value_LUT(v, LUT, sizeLUT, _1overCutoff2) * pt.sdc;
+                                            } else {
+                                                w = kernel_value_CPU(beta * sqrt(1.0 - (v * _1overCutoff2))) * pt.sdc;
+                                            }
+
+                                            /* grid data */
+                                            if (reproducible) {
+                                                dbl_gridDataElements[idx].real_elements[tSampleDensity[idx][tid]] = w * pt.real;
+                                                dbl_gridDataElements[idx].imag_elements[tSampleDensity[idx][tid]] = w * pt.imag;
+                                            } else {
+                                                gridDataElements[idx].real_elements[tSampleDensity[idx][tid]] = w * pt.real;
+                                                gridDataElements[idx].imag_elements[tSampleDensity[idx][tid]] = w * pt.imag;
+                                            }
+                                        }
+
+                                        /* estimate sample density */
+                                        tSampleDensity[idx][tid]++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+#pragma omp barrier
+
+        if (step == 0)
+        {
+#pragma omp for
+            for (idx = 0; idx < gridNumElems; ++idx) {
+                sum_prev = 0;
+                sum = 0;
+                for (int tidx = 0; tidx < numThreads; ++tidx) {
+                    sum += tSampleDensity[idx][tidx];
+                    tSampleDensity[idx][tidx] = sum_prev;
+                    sum_prev = sum;
+                }
+
+                /* set sample density now */
+                sampleDensity[idx] = (float) sum;
+
+                // allocate elements for summation only for points that have samples
+                if (sum > 0) {
+                    if (reproducible) {
+                        dbl_gridDataElements[idx].real_elements = (double *) malloc(sum * sizeof(double));
+                        dbl_gridDataElements[idx].imag_elements = (double *) malloc(sum * sizeof(double));
+                    } else {
+                        gridDataElements[idx].real_elements = (float *) malloc(sum * sizeof(float));
+                        gridDataElements[idx].imag_elements = (float *) malloc(sum * sizeof(float));
+                    }
+                }
+            }
+        }
+        else
+        {
+#pragma omp for
+            for (idx = 0; idx < gridNumElems; ++idx) {
+                if (sampleDensity[idx] > 0) {
+                    if (reproducible) {
+                        gridData[idx].real = static_cast<float> (exsum(
+                            /* Ng */            (int) sampleDensity[idx],
+                            /* ag */            dbl_gridDataElements[idx].real_elements,
+                            /* inca */          1,
+                            /* offset */        0,
+                            /* fpe */           fpe,
+                            /* early_exit */    early_exit,
+                            /* parallel */      false));
+
+                        gridData[idx].imag = static_cast<float> (exsum(
+                            /* Ng */            (int) sampleDensity[idx],
+                            /* ag */            dbl_gridDataElements[idx].imag_elements,
+                            /* inca */          1,
+                            /* offset */        0,
+                            /* fpe */           fpe,
+                            /* early_exit */    early_exit,
+                            /* parallel */      false));
+
+                        // cleanup
+                        free(dbl_gridDataElements[idx].real_elements);
+                        free(dbl_gridDataElements[idx].imag_elements);
+                    } else {
+                        for (int i = 0; i < (int) sampleDensity[idx]; ++i) {
+                            gridData[idx].real += gridDataElements[idx].real_elements[i];
+                            gridData[idx].imag += gridDataElements[idx].imag_elements[i];
+                        }
+
+                        // cleanup
+                        free(gridDataElements[idx].real_elements);
+                        free(gridDataElements[idx].imag_elements);
+                    }
+                }
+            }
+        }
+    }
+}
+
+    if (reproducible) {
+        free(dbl_gridDataElements);
+    } else {
+        free(gridDataElements);
+    }
+
+    *time = omp_get_wtime() - tstart;
 }
