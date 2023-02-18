@@ -10,6 +10,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <iostream>
+#include <iomanip>
 #include <random>
 
 #include "file.h"
@@ -24,6 +26,12 @@ using namespace std;
 
 constexpr uint32_t DEFAULT_SEED = 1549813198;
 constexpr uint32_t DEFAULT_NUMBER_OF_RUNS = 50;
+
+constexpr char* input_files[] = { "bcsstk32.mtx", "fidapm05.mtx", "jgl009.mtx" };
+
+constexpr char* algorithm[] = { "accumulator-only", "fpe2", "fpe4", "fpe8ee" };
+constexpr int fpe[] = { 0, 2, 4, 8 };
+constexpr bool early_exit[] = { false, false, false, true };
 
 bool generate_vector (float *x_vector, int dim, uint32_t seed)
 {
@@ -155,8 +163,6 @@ void execute (uint32_t nruns, bool parallel, bool reproducible, const int fpe, c
               int dim, int *h_nzcnt, int *h_ptr, int *h_indices, float *h_data,
               float *h_x_vector, int *h_perm, float *h_Ax_vector, double &time)
 {
-    printf("Running %s (%sreproducible) implementation...\n", parallel ? "parallel" : "sequential", reproducible ? "" : "non-");
-
     time = 0.0f;
 
     float *tmp_h_Ax_vector = new float[dim];
@@ -170,6 +176,7 @@ void execute (uint32_t nruns, bool parallel, bool reproducible, const int fpe, c
             spmv_seq(reproducible, fpe, early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, tmp_h_Ax_vector);
         if (i == 0) {
             time = omp_get_wtime() - time;
+            cout << fixed << setprecision(10) << (float) time * 1000.0 << '\t'; // ms
             memcpy (h_Ax_vector, tmp_h_Ax_vector, dim * sizeof (float));
         } else if (diff(dim, h_Ax_vector, tmp_h_Ax_vector)) {
             printf("%s (%sreproducible) implementation not reproducible after %d runs!\n",
@@ -183,22 +190,6 @@ void execute (uint32_t nruns, bool parallel, bool reproducible, const int fpe, c
 
 int main (int argc, char** argv)
 {
-    struct pb_TimerSet timers;
-    struct pb_Parameters *parameters;
-    
-    printf ("CPU-based sparse matrix vector multiplication****\n");
-    printf ("Original version by Li-Wen Chang <lchang20@illinois.edu> and Shengzhao Wu<wu14@illinois.edu>\n");
-    printf ("This version maintained by Chris Rodrigues  ***********\n");
-
-    parameters = pb_ReadParameters (&argc, argv);
-    if (parameters->inpFiles[0] == NULL) {
-        fprintf (stderr, "Expecting one input filename.\n");
-        exit (-1);
-    }
-
-    pb_InitializeTimerSet (&timers);
-    pb_SwitchToTimer (&timers, pb_TimerID_COMPUTE);
-
     // Parameters declaration
     //
     int len;
@@ -218,88 +209,86 @@ int main (int argc, char** argv)
 
     // Vector
     //
-    float *h_Ax_vector_seq, *h_Ax_vector_seq_rep, *h_Ax_vector_omp, *h_Ax_vector_omp_rep;
+    float *h_Ax_vector_seq, *h_Ax_vector_omp;
     float *h_x_vector;
 
-    // Load matrix from files
-    //
-    pb_SwitchToTimer (&timers, pb_TimerID_IO);
+    double time_seq, time_omp;
 
-    int col_count;
-    coo_to_jds(
-        parameters->inpFiles[0], // bcsstk32.mtx, fidapm05.mtx, jgl009.mtx
-        1, // row padding
-        pad, // warp size
-        1, // pack size
-        1, // debug level [0:2]
-        &h_data, &h_ptr, &h_nzcnt, &h_indices, &h_perm,
-        &col_count, &dim, &len, &nzcnt_len, &depth
-    );
+    const int exe_path_len = strrchr(argv[0], '/') - argv[0] + 1;
+    char exe_path[256];
+    strncpy(exe_path, argv[0], exe_path_len);
+    exe_path[exe_path_len] = '\0';
 
-    h_Ax_vector_seq = new float[dim];
-    h_Ax_vector_seq_rep = new float[dim];
-    h_Ax_vector_omp = new float[dim];
-    h_Ax_vector_omp_rep = new float[dim];
+    char input_file_path[256];
 
-    h_x_vector = new float[dim];
+    cout << "unit: [ms]\n\n";
 
-    uint32_t seed = parameters->seed == 0 ? DEFAULT_SEED : parameters->seed;
-    uint32_t nruns = parameters->nruns == 0 ? DEFAULT_NUMBER_OF_RUNS : parameters->nruns;
+    for (int i = 0; i < 3; ++i)
+    {
+        strncpy(input_file_path, exe_path, exe_path_len + 1);
+        strcat(input_file_path, "data/");
+        strcat(input_file_path, input_files[i]);
 
-    if (!generate_vector(h_x_vector, dim, seed)) {
-        fprintf(stderr, "Failed to generate dense vector.\n");
-        exit(-1);
+        cout << input_files[i] << "\n\n";
+
+        int col_count;
+        coo_to_jds(
+            input_file_path,
+            1, // row padding
+            pad, // warp size
+            1, // pack size
+            0, // debug level [0:2]
+            &h_data, &h_ptr, &h_nzcnt, &h_indices, &h_perm,
+            &col_count, &dim, &len, &nzcnt_len, &depth
+        );
+
+        h_x_vector = new float[dim];
+
+        if (!generate_vector(h_x_vector, dim, DEFAULT_SEED)) {
+            fprintf(stderr, "Failed to generate dense vector.\n");
+            exit(-1);
+        }
+
+        h_Ax_vector_seq = new float[dim];
+        h_Ax_vector_omp = new float[dim];
+        
+        int algcnt = sizeof(algorithm) / sizeof(char*);
+
+        for (int algidx = 0; algidx < algcnt; ++algidx)
+        {
+            cout << algorithm[algidx] << "\n\n";
+
+            cout << "seq\t";
+            for (int run = 0; run < 3; ++run) execute (1, false, true, fpe[algidx], early_exit[algidx], dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq, time_seq);
+            cout << '\n';
+
+            for (int thread_count = 1; thread_count <= 128; thread_count <<= 1)
+            {
+                omp_set_dynamic(0);                 // Explicitly disable dynamic teams
+                omp_set_num_threads(thread_count);  // Use  thread_count threads for all consecutive parallel regions
+
+                #pragma omp parallel
+                #pragma omp single
+                {
+                    cout << omp_get_num_threads() << '\t';
+                }
+
+                for (int run = 0; run < 3; ++run) execute (1, true, true, fpe[algidx], early_exit[algidx], dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq, time_seq);
+                cout << '\n';
+            }
+
+            cout << '\n';
+        }
+
+        delete[] h_data;
+        delete[] h_indices;
+        delete[] h_ptr;
+        delete[] h_perm;
+        delete[] h_nzcnt;
+        delete[] h_Ax_vector_seq;
+        delete[] h_Ax_vector_omp;
+        delete[] h_x_vector;
     }
-
-    pb_SwitchToTimer(&timers, pb_TimerID_COMPUTE);
-
-    double time_seq, time_omp, time_seq_rep, time_omp_rep;
-
-    execute (nruns, false, false, parameters->fpe, parameters->early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq, time_seq);
-    execute (nruns, false, true, parameters->fpe, parameters->early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_seq_rep, time_seq_rep);
-    execute (nruns, true, false, parameters->fpe, parameters->early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_omp, time_omp);
-    execute (nruns, true, true, parameters->fpe, parameters->early_exit, dim, h_nzcnt, h_ptr, h_indices, h_data, h_x_vector, h_perm, h_Ax_vector_omp_rep, time_omp_rep);
-
-    printf("Non-reproducible sequential and parallel results %smatch!\n",
-           diff(dim, h_Ax_vector_seq, h_Ax_vector_omp) ? "do not " : "");
-
-    printf("Reproducible sequential and parallel results %smatch!\n",
-           diff(dim, h_Ax_vector_seq_rep, h_Ax_vector_omp_rep) ? "do not " : "");
-
-    if (diff(dim, h_Ax_vector_seq, h_Ax_vector_seq_rep)) {
-        printf("Non-reproducible and reproducible sequential results do not match!\n");
-    }
-
-    if (diff(dim, h_Ax_vector_omp, h_Ax_vector_omp_rep)) {
-        printf("Non-reproducible and reproducible parallel results do not match!\n");
-    }
-
-    printf("Sequential implementation time: %.3f\n", time_seq);
-    printf("Parallel implementation time: %.3f\n", time_omp);
-    printf("Speedup: %.3f\n", time_seq / time_omp);
-
-    printf("Sequential implementation time (reproducible): %.3f\n", time_seq_rep);
-    printf("Parallel implementation time (reproducible): %.3f\n", time_omp_rep);
-    printf("Speedup (reproducible): %.3f\n", time_seq_rep / time_omp_rep);
-
-    printf("Time sequential reproducible / non-reproducible: %.3f\n", time_seq_rep / time_seq);
-    printf("Time parallel reproducible / non-reproducible: %.3f\n", time_omp_rep / time_omp);
-
-    delete[] h_data;
-    delete[] h_indices;
-    delete[] h_ptr;
-    delete[] h_perm;
-    delete[] h_nzcnt;
-    delete[] h_Ax_vector_seq;
-    delete[] h_Ax_vector_seq_rep;
-    delete[] h_Ax_vector_omp;
-    delete[] h_Ax_vector_omp_rep;
-    delete[] h_x_vector;
-
-    pb_SwitchToTimer(&timers, pb_TimerID_NONE);
-    pb_PrintTimerSet(&timers);
-
-    pb_FreeParameters(parameters);
 
     return 0;
 }
