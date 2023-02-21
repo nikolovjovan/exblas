@@ -174,11 +174,6 @@ int allocate(int n_points, int n_features, int n_clusters, float **feature)
 	fread(source + strlen(source), sourcesize, 1, fp);
 	fclose(fp);
 
-	// OpenCL initialization
-	int use_gpu = 1;
-	if (initialize(use_gpu))
-		return -1;
-
 	// compile kernel
 	cl_int err = 0;
 	const char *slist[2] = {source, 0};
@@ -292,9 +287,13 @@ void deallocateMemory()
 
 int main(int argc, char **argv)
 {
-	printf("WG size of kernel_swap = %d, WG size of kernel_kmeans = %d \n", BLOCK_SIZE, BLOCK_SIZE2);
+	// OpenCL initialization
+	if (initialize(1))
+		exit(-1);
 
 	setup(argc, argv);
+
+	// OpenCL shutdown
 	shutdown();
 }
 

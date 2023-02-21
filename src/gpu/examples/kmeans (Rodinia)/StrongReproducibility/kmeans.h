@@ -44,15 +44,17 @@
 #define FLT_MAX 3.40282347e+38
 #endif
 
+#include <cstdint>
+
 /* rmse.c */
 float euclid_dist_2(float *, float *, int);
 int find_nearest_point(float *, int, float **, int);
 float rms_err(float **, int, int, float **, int);
-int cluster(bool, int, int, float **, int, int, float, int *, float ***, float *, int, int, const int fpe = 0, const bool early_exit = false);
+int cluster(int, int, float **, int, int, float, int *, float ***, float *, int, int, uint64_t&, uint64_t&, const int fpe = 0, const bool early_exit = false);
 int setup(int argc, char **argv);
 int allocate(int npoints, int nfeatures, int nclusters, float **feature);
 void deallocateMemory();
 int* calculate_membership(int n_features, int n_points, int n_clusters, float **clusters);
-float **kmeans_clustering(bool reproducible, float **feature, int nfeatures, int npoints, int nclusters, float threshold, int *membership, const int fpe = 0, const bool early_exit = false);
+float **kmeans_clustering(float **feature, int nfeatures, int npoints, int nclusters, float threshold, int *membership, const int fpe = 0, const bool early_exit = false);
 
 #endif
