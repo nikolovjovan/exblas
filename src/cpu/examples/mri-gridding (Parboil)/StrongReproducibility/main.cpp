@@ -16,32 +16,28 @@
 
 #define PI 3.14159265
 
-#define CALLOC_AND_CHECK(name, type, size, errCode) \
-    type *name = (type *) calloc(size, sizeof(type)); \
-    if (name == NULL) { \
-        printf("ERROR: Unable to allocate memory for " #name ".\n"); \
-        exit(errCode); \
-    }
-
 extern void calculate_LUT_seq(float beta, float width, float **LUT, unsigned int *sizeLUT);
 
 extern void calculate_LUT_omp(float beta, float width, float **LUT, unsigned int *sizeLUT);
 
-extern void gridding_seq(unsigned int n, parameters params, ReconstructionSample *sample, float *LUT,
-                         unsigned int sizeLUT, cmplx *gridData, float *sampleDensity,
-                         bool reproducible, double *time,
-                         const int fpe = 0, const bool early_exit = false);
+extern void gridding_seq(unsigned int n, parameters params, ReconstructionSample *sample,
+                         float *LUT, unsigned int sizeLUT, cmplx *gridData, float *sampleDensity,
+                         const int fpe, const bool early_exit);
 
-extern void gridding_omp(unsigned int n, parameters params, ReconstructionSample *sample, float *LUT,
-                         unsigned int sizeLUT, cmplx *gridData, float *sampleDensity,
-                         bool reproducible, double *time,
-                         const int fpe = 0, const bool early_exit = false);
+extern void gridding_omp(unsigned int n, parameters params, ReconstructionSample *sample,
+                         float *LUT, unsigned int sizeLUT, cmplx *gridData, float *sampleDensity,
+                         const int fpe, const bool early_exit);
 
-extern void gridding_omp_mem(unsigned int n, parameters params, ReconstructionSample *sample, float *LUT,
-                             unsigned int sizeLUT, cmplx *gridData, float *sampleDensity, double *time);
+#include <iostream>
+#include <iomanip>
 
-extern void gridding_omp_locks(unsigned int n, parameters params, ReconstructionSample *sample, float *LUT,
-                               unsigned int sizeLUT, cmplx *gridData, float *sampleDensity, double *time);
+using namespace std;
+
+constexpr char* input_files[] = { "small/small.uks" };
+
+constexpr char* algorithm[] = { "accumulator-only", "fpe2", "fpe4", "fpe8ee" };
+constexpr int fpe[] = { 0, 2, 4, 8 };
+constexpr bool early_exit[] = { false, false, false, true };
 
 /************************************************************
  * This function reads the parameters from the file provided
@@ -59,18 +55,6 @@ void setParameters(FILE *file, parameters *p)
     fscanf(file, "gridding.oversampling=%f\n", &(p->oversample));
     fscanf(file, "kernel.width=%f\n", &(p->kernelWidth));
     fscanf(file, "kernel.useLUT=%d\n", &(p->useLUT));
-
-    printf("  Number of samples = %d\n", p->numSamples);
-    printf("  Grid Size = %dx%dx%d\n", p->gridSize[0], p->gridSize[1], p->gridSize[2]);
-    printf("  Input Matrix Size = %dx%dx%d\n", p->aquisitionMatrixSize[0], p->aquisitionMatrixSize[1],
-           p->aquisitionMatrixSize[2]);
-    printf("  Recon Matrix Size = %dx%dx%d\n", p->reconstructionMatrixSize[0], p->reconstructionMatrixSize[1],
-           p->reconstructionMatrixSize[2]);
-    printf("  Kernel Width = %f\n", p->kernelWidth);
-    printf("  KMax = %.2f %.2f %.2f\n", p->kMax[0], p->kMax[1], p->kMax[2]);
-    printf("  Oversampling = %f\n", p->oversample);
-    printf("  GPU Binsize = %d\n", p->binsize);
-    printf("  Use LUT = %s\n", (p->useLUT) ? "Yes" : "No");
 }
 
 /************************************************************
@@ -121,272 +105,142 @@ unsigned int readSampleData(parameters params, FILE *uksdata_f, ReconstructionSa
     return i;
 }
 
-const float ACCURACY = 0.1;
-
-/**
- * "Nastelovana" funkcija za poredjenje float vrednosti.
- * Naime, posto u racunanju vrednosti jednog elementa nizova gridData i sampleDensity postoji nekoliko hiljada operacija, preciznost operacija drasticno opada.
- * Za jednu operaciju sabiranja float garantuje preciznost od 6-7 znacajnih cifara. Kada se to ponovi nekoliko hiljada puta koliko je ovde i slucaj
- * (vidi se u nizu sampleDensity), preciznost pada na 1-2 znacajne cifre.
- * Ovaj test brojeve deli sa 10 dok ne postanu manji od 10 pa proverava da li je razlika manja od 0.1 sto efektivno znaci da proverava na 2 znacajne cifre.
- * Kada se proba sa 3 znacajne cifre ne prolazi iako brojevi "lice". Upravo to je rezultat inherentne greske kod floating point operacija.
- */
-int compare_significant_digits(float a, float b)
+void execute(bool parallel, parameters &params, unsigned int number_of_samples, ReconstructionSample *samples, const int fpe, const bool early_exit)
 {
-    while (fabs(a) > 10.f && fabs(b) > 10.f) {
-        a /= 10;
-        b /= 10;
-    }
-    if (a - b > ACCURACY) return 1;
-    if (a - b < -ACCURACY) return -1;
-    return 0;
-}
-
-int compare(float a, float b)
-{
-    if (a > b) return 1;
-    if (a < b) return -1;
-    return 0;
-}
-
-int diff(int sizeLUT, float *LUT, int sizeLUT_omp, float *LUT_omp, int gridNumElems, cmplx *gridData, float *sampleDensity, cmplx *gridData_omp, float *sampleDensity_omp)
-{
-    int i;
-
-    // Compare LUT
-    if (sizeLUT != sizeLUT_omp) {
-        printf("LUT sizes mismatch!\n");
-        return 1;
-    }
-    for (i = 0; i < sizeLUT; ++i) {
-        if (fabs(LUT[i] - LUT_omp[i]) > ACCURACY) {
-            printf("LUT[%d] mismatch: %f <-> %f\n", i, LUT[i], LUT_omp[i]);
-            return 2;
-        }
-    }
-
-    // Compare gridData and sampleDensity
-    for (i = 0; i < gridNumElems; ++i) {
-        if (compare(gridData[i].real, gridData_omp[i].real) || compare(gridData[i].imag, gridData_omp[i].imag)) {
-            printf("gridData[%d] mismatch: %f, %f <-> %f, %f\n", i, gridData[i].real, gridData[i].imag, gridData_omp[i].real, gridData_omp[i].imag);
-            return 3;
-        }
-        if (fabs(sampleDensity[i] - sampleDensity_omp[i]) > ACCURACY) {
-            printf("sampleDensity[%d] mismatch: %f <-> %f\n", i, sampleDensity[i], sampleDensity_omp[i]);
-            return 4;
-        }
-    }
-
-    // Results same
-    return 0;
-}
-
-int main(int argc, char *argv[])
-{
-    char uksfile[256];
-    char uksdata[256];
-    parameters params;
-    params.binsize = 128;
-
-    FILE *uksfile_f = NULL;
-    FILE *uksdata_f = NULL;
-
-    int fpe = 0;
-    bool early_exit = false;
-
-    if (argc < 2) {
-        printf("ERROR: Not enough arguments!\n");
-        exit(1);
-    }
-
-    strcpy(uksfile, argv[1]);
-    strcpy(uksdata, argv[1]);
-    strcat(uksdata, ".data");
-
-    uksfile_f = fopen(uksfile, "r");
-    if (uksfile_f == NULL) {
-        printf("ERROR: Could not open %s\n", uksfile);
-        exit(2);
-    }
-
-    printf("Reading parameters\n");
-
-    if (argc > 2) {
-        params.binsize = atoi(argv[2]);
-    }
-
-    if (argc > 3) {
-        fpe = atoi(argv[3]);
-    }
-
-    if (argc > 4) {
-        early_exit = (bool) atoi(argv[4]);
-    }
-
-    setParameters(uksfile_f, &params);
-
-    printf("  Number of allocated threads = %d\n", omp_get_max_threads());
-
-    ReconstructionSample *samples =
-        (ReconstructionSample *) malloc(params.numSamples * sizeof(ReconstructionSample)); // Input Data
-
-    if (samples == NULL) {
-        printf("ERROR: Unable to allocate memory for input data\n");
-        exit(1);
-    }
-
-    float *LUT_seq, *LUT_omp;              // use look-up table for faster execution on CPU (intermediate data)
-    unsigned int sizeLUT_seq, sizeLUT_omp; // set in the function calculateLUT (intermediate data)
+    float *LUT;             // use look-up table for faster execution on CPU (intermediate data)
+    unsigned int sizeLUT;   // set in the function calculateLUT (intermediate data)
 
     int gridNumElems = params.gridSize[0] * params.gridSize[1] * params.gridSize[2];
 
     // Output Data
-    CALLOC_AND_CHECK (/* name */ gridData_seq,                  /* type */ cmplx,   /* size */ gridNumElems,    /* errCode */ 1);
-    CALLOC_AND_CHECK (/* name */ gridData_omp_mem,              /* type */ cmplx,   /* size */ gridNumElems,    /* errCode */ 2);
-    CALLOC_AND_CHECK (/* name */ gridData_omp_locks,            /* type */ cmplx,   /* size */ gridNumElems,    /* errCode */ 3);
-    CALLOC_AND_CHECK (/* name */ gridData_omp_2step,            /* type */ cmplx,   /* size */ gridNumElems,    /* errCode */ 4);
-    CALLOC_AND_CHECK (/* name */ gridData_seq_rep,              /* type */ cmplx,   /* size */ gridNumElems,    /* errCode */ 5);
-    CALLOC_AND_CHECK (/* name */ gridData_omp_2step_rep,        /* type */ cmplx,   /* size */ gridNumElems,    /* errCode */ 6);
-    CALLOC_AND_CHECK (/* name */ sampleDensity_seq,             /* type */ float,   /* size */ gridNumElems,    /* errCode */ 7);
-    CALLOC_AND_CHECK (/* name */ sampleDensity_omp_mem,         /* type */ float,   /* size */ gridNumElems,    /* errCode */ 8);
-    CALLOC_AND_CHECK (/* name */ sampleDensity_omp_locks,       /* type */ float,   /* size */ gridNumElems,    /* errCode */ 9);
-    CALLOC_AND_CHECK (/* name */ sampleDensity_omp_2step,       /* type */ float,   /* size */ gridNumElems,    /* errCode */ 10);
-    CALLOC_AND_CHECK (/* name */ sampleDensity_seq_rep,         /* type */ float,   /* size */ gridNumElems,    /* errCode */ 11);
-    CALLOC_AND_CHECK (/* name */ sampleDensity_omp_2step_rep,   /* type */ float,   /* size */ gridNumElems,    /* errCode */ 12);
+    cmplx *gridData = (cmplx *) calloc(gridNumElems, sizeof(cmplx));
+    float *sampleDensity = (float *) calloc(gridNumElems, sizeof(float));
 
-    uksdata_f = fopen(uksdata, "rb");
-
-    if (uksdata_f == NULL) {
-        printf("ERROR: Could not open data file\n");
+    if (gridData == nullptr || sampleDensity == nullptr) {
+        printf("ERROR: Unable to allocate memory for output data\n");
         exit(1);
     }
 
-    printf("Reading input data from files\n");
-
-    unsigned int n = readSampleData(params, uksdata_f, samples);
-    fclose(uksdata_f);
-
-    double tstart, time_loop_seq, time_loop_omp_mem, time_loop_omp_locks, time_loop_omp_2step, time_loop_seq_rep, time_loop_omp_2step_rep;
-    double time_seq = 0, time_omp_mem = 0, time_omp_locks = 0, time_omp_2step = 0, time_seq_rep = 0, time_omp_2step_rep = 0;
+    double start, time = 0;
 
     if (params.useLUT) {
-        printf("Generating Look-Up Table\n");
         float beta = PI * sqrt(4 * params.kernelWidth * params.kernelWidth / (params.oversample * params.oversample) * (params.oversample - .5) * (params.oversample - .5) - .8);
 
-        tstart = omp_get_wtime();
-        calculate_LUT_seq(beta, params.kernelWidth, &LUT_seq, &sizeLUT_seq);
-        time_seq += omp_get_wtime() - tstart;
-
-        tstart = omp_get_wtime();
-        calculate_LUT_omp(beta, params.kernelWidth, &LUT_omp, &sizeLUT_omp);
-        time_omp_mem += omp_get_wtime() - tstart;
+        start = omp_get_wtime();
+        if (parallel) {
+            calculate_LUT_omp(beta, params.kernelWidth, &LUT, &sizeLUT);
+        } else {
+            calculate_LUT_seq(beta, params.kernelWidth, &LUT, &sizeLUT);
+        }
+        time += omp_get_wtime() - start;
     }
 
-    printf("\nSequential implementation LUT generation execution time: %.3f\n", time_seq);
-    printf("Parallel implementation LUT generation execution time: %.3f\n", time_omp_mem);
-    printf("LUT generation speedup: %.3f\n\n", time_seq / time_omp_mem);
-
-    /* add LUT calculation time to reproducible time, no need to calculate LUT twice */
-    time_omp_locks += time_omp_mem;
-    time_omp_2step += time_omp_mem;
-    time_seq_rep += time_seq;
-    time_omp_2step_rep += time_omp_mem;
-
-    tstart = omp_get_wtime();
-    gridding_seq(n, params, samples, LUT_seq, sizeLUT_seq, gridData_seq, sampleDensity_seq, false, &time_loop_seq);
-    time_seq += omp_get_wtime() - tstart;
-
-    tstart = omp_get_wtime();
-    gridding_omp_mem(n, params, samples, LUT_seq, sizeLUT_seq, gridData_omp_mem, sampleDensity_omp_mem, &time_loop_omp_mem);
-    time_omp_mem += omp_get_wtime() - tstart;
-
-    tstart = omp_get_wtime();
-    gridding_omp_locks(n, params, samples, LUT_seq, sizeLUT_seq, gridData_omp_locks, sampleDensity_omp_locks, &time_loop_omp_locks);
-    time_omp_locks += omp_get_wtime() - tstart;
-
-    tstart = omp_get_wtime();
-    gridding_omp(n, params, samples, LUT_seq, sizeLUT_seq, gridData_omp_2step, sampleDensity_omp_2step, /* reproducible */ false, &time_loop_omp_2step, fpe, early_exit);
-    time_omp_2step += omp_get_wtime() - tstart;
-
-    tstart = omp_get_wtime();
-    gridding_seq(n, params, samples, LUT_seq, sizeLUT_seq, gridData_seq_rep, sampleDensity_seq_rep, true, &time_loop_seq_rep);
-    time_seq_rep += omp_get_wtime() - tstart;
-
-    tstart = omp_get_wtime();
-    gridding_omp(n, params, samples, LUT_omp, sizeLUT_omp, gridData_omp_2step_rep, sampleDensity_omp_2step_rep, /* reproducible */ true, &time_loop_omp_2step_rep, fpe, early_exit);
-    time_omp_2step_rep += omp_get_wtime() - tstart;
-
-    printf("\n");
-
-    if (diff(sizeLUT_seq, LUT_seq, sizeLUT_seq, LUT_seq, gridNumElems,
-        gridData_seq, sampleDensity_seq, gridData_seq_rep, sampleDensity_seq_rep)) {
-        printf("Non-reproducible and reproducible sequential results do not match!\n");
+    start = omp_get_wtime();
+    if (parallel) {
+        gridding_omp(number_of_samples, params, samples, LUT, sizeLUT, gridData, sampleDensity, fpe, early_exit);
+    } else {
+        gridding_seq(number_of_samples, params, samples, LUT, sizeLUT, gridData, sampleDensity, fpe, early_exit);
     }
+    time += omp_get_wtime() - start;
 
-    if (diff(sizeLUT_omp, LUT_omp, sizeLUT_omp, LUT_omp, gridNumElems,
-        gridData_omp_2step, sampleDensity_omp_2step, gridData_omp_2step_rep, sampleDensity_omp_2step_rep)) {
-        printf("Non-reproducible and reproducible parallel results do not match!\n");
-    }
-
-    printf("\nNon-reproducible sequential and parallel results ");
-    if (diff(sizeLUT_seq, LUT_seq, sizeLUT_omp, LUT_omp, gridNumElems,
-        gridData_seq, sampleDensity_seq, gridData_omp_2step, sampleDensity_omp_2step)) {
-        printf("do not ");
-    }
-    printf("match!\n");
-
-    printf("Reproducible sequential and parallel results ");
-    if (diff(sizeLUT_seq, LUT_seq, sizeLUT_omp, LUT_omp, gridNumElems,
-        gridData_seq_rep, sampleDensity_seq_rep, gridData_omp_2step_rep, sampleDensity_omp_2step_rep)) {
-        printf("do not ");
-    }
-    printf("match!\n");
-
-    printf("\nSequential implementation loop execution time: %.3f\n", time_loop_seq);
-    printf("Parallel implementation loop execution time (mem): %.3f\n", time_loop_omp_mem);
-    printf("Loop speedup: %.3f\n", time_loop_seq / time_loop_omp_mem);
-    printf("Parallel implementation loop execution time (locks): %.3f\n", time_loop_omp_locks);
-    printf("Loop speedup: %.3f\n", time_loop_seq / time_loop_omp_locks);
-    printf("Parallel implementation loop execution time (2step): %.3f\n", time_loop_omp_2step);
-    printf("Loop speedup: %.3f\n", time_loop_seq / time_loop_omp_2step);
-
-    printf("\nReproducible sequential implementation loop execution time: %.3f\n", time_loop_seq_rep);
-    printf("Reproducible parallel implementation loop execution time: %.3f\n", time_loop_omp_2step_rep);
-    printf("Loop speedup (reproducible): %.3f\n", time_loop_seq_rep / time_loop_omp_2step_rep);
-
-    printf("\nSequential implementation execution time: %.3f\n", time_seq);
-    printf("Parallel implementation execution time (mem): %.3f\n", time_omp_mem);
-    printf("Speedup: %.3f\n", time_seq / time_omp_mem);
-    printf("Parallel implementation execution time (locks): %.3f\n", time_omp_locks);
-    printf("Speedup: %.3f\n", time_seq / time_omp_locks);
-    printf("Parallel implementation execution time (2step): %.3f\n", time_omp_2step);
-    printf("Speedup: %.3f\n", time_seq / time_omp_2step);
-
-    printf("\nReproducible sequential implementation execution time: %.3f\n", time_seq_rep);
-    printf("Reproducible parallel implementation execution time: %.3f\n", time_omp_2step_rep);
-    printf("Speedup (reproducible): %.3f\n", time_seq_rep / time_omp_2step_rep);
-
-    printf("\nTime sequential reproducible / non-reproducible: %.3f\n", time_seq_rep / time_seq);
-    printf("Time parallel reproducible / non-reproducible: %.3f\n", time_omp_2step_rep / time_omp_2step);
+    cout << fixed << setprecision(10) << (float) time * 1000.0 << '\t'; // ms
 
     if (params.useLUT) {
-        free(LUT_seq);
-        free(LUT_omp);
+        free(LUT);
     }
+    free(gridData);
+    free(sampleDensity);
+}
 
-    free(samples);
-    free(gridData_seq);
-    free(gridData_omp_mem);
-    free(gridData_omp_locks);
-    free(gridData_omp_2step);
-    free(gridData_seq_rep);
-    free(gridData_omp_2step_rep);
-    free(sampleDensity_seq);
-    free(sampleDensity_omp_mem);
-    free(sampleDensity_omp_locks);
-    free(sampleDensity_omp_2step);
-    free(sampleDensity_seq_rep);
-    free(sampleDensity_omp_2step_rep);
+int main(int argc, char *argv[])
+{
+    parameters params;
+    ReconstructionSample *samples;
+    unsigned int number_of_samples;
+
+    const int exe_path_len = strrchr(argv[0], '/') - argv[0] + 1;
+    char exe_path[256];
+    strncpy(exe_path, argv[0], exe_path_len);
+    exe_path[exe_path_len] = '\0';
+
+    char uksfile[256];
+    char uksdata[256];
+
+    cout << "unit: [ms]\n\n";
+
+    int nfiles = sizeof(input_files) / sizeof(input_files[0]);
+
+    for (int file_idx = 0; file_idx < nfiles; ++file_idx)
+    {
+        strncpy(uksfile, exe_path, exe_path_len + 1);
+        strcat(uksfile, "data/");
+        strcat(uksfile, input_files[file_idx]);
+
+        cout << input_files[file_idx] << "\n";
+
+        {
+            FILE *uksfile_f = nullptr;
+            FILE *uksdata_f = nullptr;
+
+            strcpy(uksdata, uksfile);
+            strcat(uksdata, ".data");
+
+            uksfile_f = fopen(uksfile, "r");
+            if (uksfile_f == nullptr) {
+                printf("ERROR: Could not open %s\n", uksfile);
+                exit(1);
+            }
+
+            setParameters(uksfile_f, &params);
+
+            samples = (ReconstructionSample *) malloc(params.numSamples * sizeof(ReconstructionSample)); // Input Data
+
+            if (samples == nullptr) {
+                printf("ERROR: Unable to allocate memory for input data\n");
+                exit(1);
+            }
+
+            uksdata_f = fopen(uksdata, "rb");
+
+            if (uksdata_f == nullptr) {
+                printf("ERROR: Could not open data file\n");
+                exit(1);
+            }
+
+            number_of_samples = readSampleData(params, uksdata_f, samples);
+            fclose(uksdata_f);
+        }
+
+        int algcnt = sizeof(algorithm) / sizeof(char*);
+
+        for (int algidx = 0; algidx < algcnt; ++algidx)
+        {
+            cout << algorithm[algidx] << "\n\n";
+
+            cout << "\nseq\t";
+            for (int run = 0; run < 3; ++run) execute (false, params, number_of_samples, samples, fpe[algidx], early_exit[algidx]);
+            cout << '\n';
+            
+            for (int thread_count = 1; thread_count <= 128; thread_count <<= 1)
+            {
+                omp_set_dynamic(0);                 // Explicitly disable dynamic teams
+                omp_set_num_threads(thread_count);  // Use  thread_count threads for all consecutive parallel regions
+
+                #pragma omp parallel
+                #pragma omp single
+                {
+                    cout << omp_get_num_threads() << '\t';
+                }
+
+                for (int run = 0; run < 3; ++run) execute (true, params, number_of_samples, samples, fpe[algidx], early_exit[algidx]);
+                cout << '\n';
+            }
+
+            cout << '\n';
+        }
+            
+        free(samples);
+    }
 
     return 0;
 }
