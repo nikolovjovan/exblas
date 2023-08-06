@@ -6,6 +6,12 @@
 #include <string>
 #include "kmeans.h"
 
+#include <chrono>
+#include <iomanip>
+#include <iostream>
+
+using namespace std;
+
 #ifdef WIN
 #include <windows.h>
 #else
@@ -287,14 +293,25 @@ void deallocateMemory()
 
 int main(int argc, char **argv)
 {
+	uint64_t time_setup = 0;
+
+    chrono::steady_clock::time_point start;
+
+	start = chrono::steady_clock::now();
 	// OpenCL initialization
 	if (initialize(1))
 		exit(-1);
+	time_setup += chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
 
 	setup(argc, argv);
 
+	start = chrono::steady_clock::now();
 	// OpenCL shutdown
 	shutdown();
+	time_setup += chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
+
+	cout << "\nOpenCL initialization time [ms]: ";
+	cout << fixed << setprecision(10) << (float) time_setup / 1000.0 << '\n'; // ms
 }
 
 int* calculate_membership(int n_features,

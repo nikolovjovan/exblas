@@ -122,7 +122,7 @@ int cluster(int npoints,	   /* number of data points */
 		/* allocate device memory, invert data array (@ kmeans_cuda.cu) */
 		start = chrono::steady_clock::now();
 		allocate(npoints, nfeatures, nclusters, features);
-		time_setup += chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
+		time_run += chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
 
 		start = chrono::steady_clock::now();
 		/* iterate nloops times for each number of clusters */
@@ -168,7 +168,7 @@ int cluster(int npoints,	   /* number of data points */
 
 		start = chrono::steady_clock::now();
 		deallocateMemory(); /* free device memory (@ kmeans_cuda.cu) */
-		time_setup += chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
+		time_run += chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
 	}
 
 	free(membership);
