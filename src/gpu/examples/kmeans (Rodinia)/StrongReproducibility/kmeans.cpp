@@ -293,15 +293,27 @@ void deallocateMemory()
 
 int main(int argc, char **argv)
 {
-	uint64_t time_setup = 0;
-
-    chrono::steady_clock::time_point start;
+	chrono::steady_clock::time_point start;
+	uint64_t time_setup;
 
 	start = chrono::steady_clock::now();
 	// OpenCL initialization
 	if (initialize(1))
 		exit(-1);
+	time_setup = chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
+
+	start = chrono::steady_clock::now();
+	// OpenCL shutdown
+	shutdown();
 	time_setup += chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
+
+	cout << "OCL first (dummy) initialization time [ms]: " << fixed << setprecision(10) << (float) time_setup / 1000.0 << endl << endl;
+
+	start = chrono::steady_clock::now();
+	// OpenCL initialization
+	if (initialize(1))
+		exit(-1);
+	time_setup = chrono::duration_cast<chrono::microseconds>(chrono::steady_clock::now() - start).count();
 
 	setup(argc, argv);
 
